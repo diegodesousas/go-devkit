@@ -1,6 +1,6 @@
 # go-devkit
 
-Go developer kit for paag applications
+Go developer kit for multipurpose applications
 
 # Streams
 
