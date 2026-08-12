@@ -16,6 +16,30 @@ Não há binário — só `pkg/` (a lib) e `examples/` (um `package main` por re
 
 `CGO_ENABLED=1` é obrigatório: `confluent-kafka-go v1.9.2` embute librdkafka via cgo, e `-race` também depende disso.
 
+## Fluxo de trabalho git
+
+**Nenhuma implementação nova vai direto na `main`** — nem correção de uma linha. Antes da primeira edição: `git checkout main && git pull`, depois `git checkout -b <tipo>/<descricao>`.
+
+- **Nome da branch:** `tipo/descricao-em-kebab-case`, com `tipo` ∈ `feat`, `fix`, `chore`, `docs`, `refactor`, `test`. Em inglês, como o resto do repo.
+- **Commits em Conventional Commits** (`feat:`, `fix:`, `chore:` …), também em inglês — é o que o histórico já usa (`chore: set up Claude Code harness and split integration tests`).
+- **Antes de abrir o PR:** `make test` e `make lint` verdes. Se tocou `pkg/database/sql`, também `make test-integration`.
+- **PR sempre contra `main`**, via `gh pr create`. Merge e push acontecem quando você pedir.
+
+**Depois do merge, o trabalho só termina com o ambiente git limpo.** Use `/finish`, que roda a sequência:
+
+```
+git checkout main && git pull
+git branch -d <branch>                  # local
+git fetch --prune                       # remove a ref remota já apagada pelo GitHub
+git push origin --delete <branch>       # só se ela tiver sobrevivido
+git worktree remove <path> && git worktree prune   # se houve worktree
+git stash list                          # tem que sair vazio
+```
+
+O repositório está com `delete_branch_on_merge: true` no GitHub, então a branch remota some sozinha no merge do PR — o `git fetch --prune` é que limpa a ref local que ficou apontando para ela. O `git push origin --delete` continua no roteiro como rede de segurança, para branches criadas antes dessa configuração (foi assim que `chore/claude-code-harness` sobreviveu ao merge do PR #1) ou que não passaram por PR.
+
+Estado final esperado: em `main`, atualizada, `git branch -a` sem a branch do trabalho, `git worktree list` com uma única entrada.
+
 ## Convenções de código
 
 Ao escrever código novo, siga o que já existe — mesmo quando houver alternativa mais moderna. Consistência aqui vale mais que idiomatismo isolado.
