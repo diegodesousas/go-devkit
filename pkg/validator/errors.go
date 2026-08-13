@@ -31,7 +31,7 @@ func NewRequiredError(fieldName string) Error {
 func NewInvalidError(fieldName string, value any) Error {
 	return Error{
 		Code:    InvalidError,
-		Message: fmt.Sprintf("value %s for attribute %s is invalid", value, fieldName),
+		Message: fmt.Sprintf("value %v for attribute %s is invalid", value, fieldName),
 	}
 }
 
