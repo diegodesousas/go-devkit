@@ -36,7 +36,8 @@ func Error(ctx context.Context, err error, fields ...Field) {
 	}
 
 	var message string
-	if tracer, ok := err.(stackTracer); ok {
+	var tracer stackTracer
+	if errors.As(err, &tracer) {
 		message = fmt.Sprintf("%s: %+v", err, tracer.StackTrace())
 	} else {
 		message = err.Error()

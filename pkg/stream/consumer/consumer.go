@@ -244,11 +244,12 @@ func (c defaultConsumer[T]) readMessage(group *sync.WaitGroup) error {
 	defer group.Done()
 
 	msg, err := c.client.ReadMessage(pollInterval)
-	if err != nil && err.(kafka.Error).Code() == kafka.ErrTimedOut {
-		return nil
-	}
+	if err != nil {
+		var kafkaErr kafka.Error
+		if errors.As(err, &kafkaErr) && kafkaErr.Code() == kafka.ErrTimedOut {
+			return nil
+		}
 
-	if err != nil && err.(kafka.Error).Code() != kafka.ErrTimedOut {
 		return err
 	}
 

@@ -32,8 +32,8 @@ var (
 )
 
 func pgErrWrapper(err error) error {
-	pgErr, ok := err.(*pgconn.PgError)
-	if !ok {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
 		return errors.WithStack(err)
 	}
 

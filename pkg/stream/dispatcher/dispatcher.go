@@ -90,11 +90,9 @@ func (d dispatcher) Dispatch(ctx context.Context, topic string, key string, cont
 func (d dispatcher) handleTopicPartitionError(err error) error {
 	wrapMessage := "dispatcher delivery error"
 
-	if kafkaErr, ok := err.(kafka.Error); ok {
-		switch kafkaErr.Code() {
-		case kafka.ErrMsgTimedOut:
-			return errors.Wrap(stream.ErrProcessMessageTimedOut, wrapMessage)
-		}
+	var kafkaErr kafka.Error
+	if errors.As(err, &kafkaErr) && kafkaErr.Code() == kafka.ErrMsgTimedOut {
+		return errors.Wrap(stream.ErrProcessMessageTimedOut, wrapMessage)
 	}
 
 	return errors.Wrap(err, wrapMessage)
