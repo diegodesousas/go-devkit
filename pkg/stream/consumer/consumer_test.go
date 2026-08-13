@@ -41,6 +41,8 @@ func TestConsumer_ProcessMessageSuccessfully(t *testing.T) {
 
 	dispatcherMock := &DispatcherMock{}
 
+	committed := make(chan struct{}, 1)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -49,10 +51,15 @@ func TestConsumer_ProcessMessageSuccessfully(t *testing.T) {
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Return(expectedKafkaMessage, nil).
 		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once().
 		On("CommitMessage", expectedKafkaMessage).
+		Run(func(mock.Arguments) {
+			committed <- struct{}{}
+		}).
 		Return([]kafka.TopicPartition{}, nil).
 		Once()
 
@@ -86,7 +93,7 @@ func TestConsumer_ProcessMessageSuccessfully(t *testing.T) {
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 5)
+	waitForCalls(t, committed, 1)
 	shutdown()
 	assert.Nil(t, err)
 
@@ -119,6 +126,8 @@ func TestConsumer_ProcessMessageSuccessfullyWithSkip(t *testing.T) {
 
 	dispatcherMock := &DispatcherMock{}
 
+	committed := make(chan struct{}, 1)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -127,10 +136,15 @@ func TestConsumer_ProcessMessageSuccessfullyWithSkip(t *testing.T) {
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Return(expectedKafkaMessage, nil).
 		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once().
 		On("CommitMessage", expectedKafkaMessage).
+		Run(func(mock.Arguments) {
+			committed <- struct{}{}
+		}).
 		Return([]kafka.TopicPartition{}, nil).
 		Once()
 
@@ -161,7 +175,7 @@ func TestConsumer_ProcessMessageSuccessfullyWithSkip(t *testing.T) {
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 5)
+	waitForCalls(t, committed, 1)
 	shutdown()
 	assert.Nil(t, err)
 
@@ -204,6 +218,8 @@ func TestConsumer_ProcessMessageSuccessfullyWithRetry(t *testing.T) {
 
 	dispatcherMock := &DispatcherMock{}
 
+	committed := make(chan struct{}, 1)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -212,10 +228,15 @@ func TestConsumer_ProcessMessageSuccessfullyWithRetry(t *testing.T) {
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Return(expectedKafkaMessage, nil).
 		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once().
 		On("CommitMessage", expectedKafkaMessage).
+		Run(func(mock.Arguments) {
+			committed <- struct{}{}
+		}).
 		Return([]kafka.TopicPartition{}, nil).
 		Once()
 
@@ -274,7 +295,7 @@ func TestConsumer_ProcessMessageSuccessfullyWithRetry(t *testing.T) {
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 5)
+	waitForCalls(t, committed, 1)
 	shutdown()
 
 	dispatcherMock.AssertExpectations(t)
@@ -324,6 +345,8 @@ func TestConsumer_ProcessMessageFailedRetry(t *testing.T) {
 		Return(nil).
 		Once()
 
+	committed := make(chan struct{}, 1)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -332,10 +355,15 @@ func TestConsumer_ProcessMessageFailedRetry(t *testing.T) {
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Return(expectedKafkaMessage, nil).
 		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once().
 		On("CommitMessage", expectedKafkaMessage).
+		Run(func(mock.Arguments) {
+			committed <- struct{}{}
+		}).
 		Return([]kafka.TopicPartition{}, nil).
 		Once()
 
@@ -372,7 +400,7 @@ func TestConsumer_ProcessMessageFailedRetry(t *testing.T) {
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 5)
+	waitForCalls(t, committed, 1)
 	shutdown()
 
 	dispatcherMock.AssertExpectations(t)
@@ -522,6 +550,8 @@ func TestConsumer_ProcessMessageFailedWithoutRetry(t *testing.T) {
 		Return(nil).
 		Once()
 
+	committed := make(chan struct{}, 1)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -530,10 +560,15 @@ func TestConsumer_ProcessMessageFailedWithoutRetry(t *testing.T) {
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Return(expectedKafkaMessage, nil).
 		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once().
 		On("CommitMessage", expectedKafkaMessage).
+		Run(func(mock.Arguments) {
+			committed <- struct{}{}
+		}).
 		Return([]kafka.TopicPartition{}, nil).
 		Once()
 
@@ -570,7 +605,7 @@ func TestConsumer_ProcessMessageFailedWithoutRetry(t *testing.T) {
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 5)
+	waitForCalls(t, committed, 1)
 	shutdown()
 
 	dispatcherMock.AssertExpectations(t)
@@ -709,6 +744,8 @@ func TestConsumer_ProcessMessageFailed_NotAbleToDefineMessageType(t *testing.T) 
 		}).
 		Once()
 
+	committed := make(chan struct{}, 1)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -717,10 +754,15 @@ func TestConsumer_ProcessMessageFailed_NotAbleToDefineMessageType(t *testing.T) 
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Return(expectedKafkaMessage, nil).
 		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once().
 		On("CommitMessage", expectedKafkaMessage).
+		Run(func(mock.Arguments) {
+			committed <- struct{}{}
+		}).
 		Return([]kafka.TopicPartition{}, nil).
 		Once()
 
@@ -745,7 +787,7 @@ func TestConsumer_ProcessMessageFailed_NotAbleToDefineMessageType(t *testing.T) 
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 5)
+	waitForCalls(t, committed, 1)
 	shutdown()
 
 	dispatcherMock.AssertExpectations(t)
@@ -859,6 +901,8 @@ func TestConsumer_ProcessMessageFailed_DeserializeError(t *testing.T) {
 		}).
 		Once()
 
+	committed := make(chan struct{}, 1)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -867,10 +911,15 @@ func TestConsumer_ProcessMessageFailed_DeserializeError(t *testing.T) {
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Return(expectedKafkaMessage, nil).
 		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once().
 		On("CommitMessage", expectedKafkaMessage).
+		Run(func(mock.Arguments) {
+			committed <- struct{}{}
+		}).
 		Return([]kafka.TopicPartition{}, nil).
 		Once()
 
@@ -895,7 +944,7 @@ func TestConsumer_ProcessMessageFailed_DeserializeError(t *testing.T) {
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 5)
+	waitForCalls(t, committed, 1)
 	shutdown()
 
 	dispatcherMock.AssertExpectations(t)
@@ -990,6 +1039,8 @@ func TestConsumer_ReadMessage_HandleKafkaTimeoutError(t *testing.T) {
 
 	dispatcherMock := &DispatcherMock{}
 
+	polled := make(chan struct{}, 1)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -997,10 +1048,12 @@ func TestConsumer_ReadMessage_HandleKafkaTimeoutError(t *testing.T) {
 		Once().
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Run(func(args mock.Arguments) {
-			time.Sleep(time.Millisecond * 10)
+			polled <- struct{}{}
 		}).
 		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once()
@@ -1026,7 +1079,7 @@ func TestConsumer_ReadMessage_HandleKafkaTimeoutError(t *testing.T) {
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 5)
+	waitForCalls(t, polled, 1)
 	shutdown()
 
 	dispatcherMock.AssertExpectations(t)
