@@ -29,9 +29,31 @@ type Config struct {
 	MaxIdleConn     int
 }
 
+// redactedPassword is what String reports in place of a non-empty password.
+const redactedPassword = "****"
+
+// dsn builds the connection string handed to the driver. It carries the
+// password in clear text, so its result must never be logged nor embedded in
+// an error message. Use String for anything human-facing.
+func (cfg Config) dsn() string {
+	return cfg.format(cfg.Password)
+}
+
+// String implements fmt.Stringer with the password redacted. Config is a
+// plausible thing to log, and without this method every %v on a Config - or on
+// any struct holding one - would print the credential in clear text.
 func (cfg Config) String() string {
+	password := cfg.Password
+	if password != "" {
+		password = redactedPassword
+	}
+
+	return cfg.format(password)
+}
+
+func (cfg Config) format(password string) string {
 	return fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database, cfg.SSLMode)
+		cfg.Host, cfg.Port, cfg.User, password, cfg.Database, cfg.SSLMode)
 }
 
 // dbConn represents a new database connection
@@ -40,7 +62,7 @@ type dbConn struct {
 }
 
 func New(cfg Config) (Connection, error) {
-	db, err := sqlx.Connect("pgx", cfg.String())
+	db, err := sqlx.Connect("pgx", cfg.dsn())
 	if err != nil {
 		return nil, errors.Wrapf(ErrConn, "%s", err)
 	}
