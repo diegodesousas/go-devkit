@@ -8,7 +8,15 @@ import (
 	"github.com/diegodesousas/go-devkit/pkg/log"
 )
 
-var metricKeyCtx interface{} = "metric"
+// metricKey is the context key holding the Metric client. An unexported struct
+// type cannot collide with a key set by another package, which a plain string
+// can.
+type metricKey struct{}
+
+// defaultRate is the statsd sample rate used when a caller does not pick one.
+// It must be 1: the rate is a sampling probability, so zero would mean "never
+// emit this metric".
+const defaultRate = 1.0
 
 type Metric interface {
 	statsd.ClientInterface
@@ -19,11 +27,11 @@ func New() (Metric, error) {
 }
 
 func putInContext(parent context.Context, metric statsd.ClientInterface) context.Context {
-	return context.WithValue(parent, metricKeyCtx, metric)
+	return context.WithValue(parent, metricKey{}, metric)
 }
 
 func fromContext(ctx context.Context) Metric {
-	metric, ok := ctx.Value(metricKeyCtx).(Metric)
+	metric, ok := ctx.Value(metricKey{}).(Metric)
 	if !ok {
 		return nil
 	}
@@ -33,7 +41,7 @@ func fromContext(ctx context.Context) Metric {
 
 func Increment(ctx context.Context, name string, tags ...string) {
 	if metric := fromContext(ctx); metric != nil {
-		err := metric.Incr(name, tags, 0)
+		err := metric.Incr(name, tags, defaultRate)
 		if err != nil {
 			log.FromContext(ctx).Error(err.Error())
 		}
