@@ -1,258 +1,258 @@
 package stream_test
 
 import (
-    "encoding/json"
-    "reflect"
-    "testing"
+	"encoding/json"
+	"reflect"
+	"testing"
 
-    "github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/confluentinc/confluent-kafka-go/kafka"
 
-    "github.com/diegodesousas/go-devkit/pkg/stream"
-    "github.com/stretchr/testify/assert"
+	"github.com/diegodesousas/go-devkit/pkg/stream"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMessage_Type(t *testing.T) {
-    type expectations struct {
-        messageType string
-    }
+	type expectations struct {
+		messageType string
+	}
 
-    tests := []struct {
-        name         string
-        message      stream.Message
-        expectations expectations
-    }{
-        {
-            name:    "Text type",
-            message: stream.NewTextMessage("test"),
-            expectations: expectations{
-                messageType: "text",
-            },
-        },
-        {
-            name:    "JSON message type",
-            message: stream.NewJsonMessage("test"),
-            expectations: expectations{
-                messageType: "json",
-            },
-        },
-    }
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            assert.Equal(t, tt.expectations.messageType, tt.message.Type())
-        })
-    }
+	tests := []struct {
+		name         string
+		message      stream.Message
+		expectations expectations
+	}{
+		{
+			name:    "Text type",
+			message: stream.NewTextMessage("test"),
+			expectations: expectations{
+				messageType: "text",
+			},
+		},
+		{
+			name:    "JSON message type",
+			message: stream.NewJsonMessage("test"),
+			expectations: expectations{
+				messageType: "json",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expectations.messageType, tt.message.Type())
+		})
+	}
 }
 
 func TestMessage_Serialize(t *testing.T) {
-    type expectations struct {
-        serializedData []byte
-        err            error
-    }
+	type expectations struct {
+		serializedData []byte
+		err            error
+	}
 
-    tests := []struct {
-        name         string
-        message      stream.Message
-        expectations expectations
-    }{
-        {
-            name:    "Text serialization success",
-            message: stream.NewTextMessage("test"),
-            expectations: expectations{
-                serializedData: []byte("test"),
-            },
-        },
-        {
-            name:    "JSON serialization success",
-            message: stream.NewJsonMessage(`{"test": "test"}`),
-            expectations: expectations{
-                serializedData: []byte(`"{\"test\": \"test\"}"`),
-            },
-        },
-        {
-            name:    "JSON serialization error",
-            message: stream.NewJsonMessage(make(chan string)),
-            expectations: expectations{
-                serializedData: nil,
-                err:            &json.UnsupportedTypeError{Type: reflect.TypeOf(make(chan string))},
-            },
-        },
-    }
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            serialized, err := tt.message.Serialize()
+	tests := []struct {
+		name         string
+		message      stream.Message
+		expectations expectations
+	}{
+		{
+			name:    "Text serialization success",
+			message: stream.NewTextMessage("test"),
+			expectations: expectations{
+				serializedData: []byte("test"),
+			},
+		},
+		{
+			name:    "JSON serialization success",
+			message: stream.NewJsonMessage(`{"test": "test"}`),
+			expectations: expectations{
+				serializedData: []byte(`"{\"test\": \"test\"}"`),
+			},
+		},
+		{
+			name:    "JSON serialization error",
+			message: stream.NewJsonMessage(make(chan string)),
+			expectations: expectations{
+				serializedData: nil,
+				err:            &json.UnsupportedTypeError{Type: reflect.TypeOf(make(chan string))},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			serialized, err := tt.message.Serialize()
 
-            assert.Equal(t, tt.expectations.serializedData, serialized)
-            assert.Equal(t, tt.expectations.err, err)
-        })
-    }
+			assert.Equal(t, tt.expectations.serializedData, serialized)
+			assert.Equal(t, tt.expectations.err, err)
+		})
+	}
 }
 
 func TestTextMessage_Deserialize_Success(t *testing.T) {
-    message := stream.NewTextMessage("")
+	message := stream.NewTextMessage("")
 
-    input := []byte("test")
-    output := ""
+	input := []byte("test")
+	output := ""
 
-    err := message.Deserialize(input, &output)
+	err := message.Deserialize(input, &output)
 
-    assert.Equal(t, "test", output)
-    assert.Nil(t, err)
+	assert.Equal(t, "test", output)
+	assert.Nil(t, err)
 }
 
 func TestTextMessage_Deserialize_Error(t *testing.T) {
-    message := stream.NewTextMessage("")
+	message := stream.NewTextMessage("")
 
-    input := []byte("test")
-    output := "without pointer"
+	input := []byte("test")
+	output := "without pointer"
 
-    err := message.Deserialize(input, output)
+	err := message.Deserialize(input, output)
 
-    assert.Equal(t, "without pointer", output)
-    assert.Equal(t, stream.ErrStringDeserialization, err)
+	assert.Equal(t, "without pointer", output)
+	assert.Equal(t, stream.ErrStringDeserialization, err)
 }
 
 func TestJSONMessage_Deserialize_Success(t *testing.T) {
-    type Test struct {
-        Number int `json:"number"`
-    }
+	type Test struct {
+		Number int `json:"number"`
+	}
 
-    message := stream.NewJsonMessage(nil)
+	message := stream.NewJsonMessage(nil)
 
-    var output Test
-    input := []byte(`{"number": 10}`)
+	var output Test
+	input := []byte(`{"number": 10}`)
 
-    err := message.Deserialize(input, &output)
+	err := message.Deserialize(input, &output)
 
-    expectedOutput := Test{
-        Number: 10,
-    }
+	expectedOutput := Test{
+		Number: 10,
+	}
 
-    assert.Equal(t, expectedOutput, output)
-    assert.Nil(t, err)
+	assert.Equal(t, expectedOutput, output)
+	assert.Nil(t, err)
 }
 
 func TestJSONMessage_Deserialize_Error(t *testing.T) {
-    message := stream.NewJsonMessage(nil)
+	message := stream.NewJsonMessage(nil)
 
-    output := make(chan string)
+	output := make(chan string)
 
-    input := []byte(`{"number": 10}`)
+	input := []byte(`{"number": 10}`)
 
-    err := message.Deserialize(input, output)
+	err := message.Deserialize(input, output)
 
-    expectedErr := &json.InvalidUnmarshalError{
-        Type: reflect.TypeOf(make(chan string)),
-    }
+	expectedErr := &json.InvalidUnmarshalError{
+		Type: reflect.TypeOf(make(chan string)),
+	}
 
-    assert.Equal(t, expectedErr, err)
+	assert.Equal(t, expectedErr, err)
 }
 
 func TestTextMessage_NewWithData_Success(t *testing.T) {
-    message := stream.NewTextMessage("")
+	message := stream.NewTextMessage("")
 
-    data := "test"
+	data := "test"
 
-    newMessage := message.NewWithData(data)
+	newMessage := message.NewWithData(data)
 
-    assert.IsType(t, message, newMessage)
+	assert.IsType(t, message, newMessage)
 }
 
 func TestJSONMessage_NewWithData_Success(t *testing.T) {
-    message := stream.NewJsonMessage(nil)
+	message := stream.NewJsonMessage(nil)
 
-    data := "json string"
+	data := "json string"
 
-    newMessage := message.NewWithData(data)
+	newMessage := message.NewWithData(data)
 
-    assert.IsType(t, message, newMessage)
+	assert.IsType(t, message, newMessage)
 }
 
 func TestNewMessageType(t *testing.T) {
-    type args struct {
-        kafkaMessage *kafka.Message
-    }
+	type args struct {
+		kafkaMessage *kafka.Message
+	}
 
-    type expectations struct {
-        message stream.Message
-        err     error
-    }
+	type expectations struct {
+		message stream.Message
+		err     error
+	}
 
-    tests := []struct {
-        name         string
-        args         args
-        expectations expectations
-    }{
-        {
-            name: "Text Message Success",
-            args: args{
-                kafkaMessage: &kafka.Message{
-                    Headers: []kafka.Header{
-                        {
-                            Key:   "DEVKIT_CONTENT_TYPE",
-                            Value: []byte("text"),
-                        },
-                    },
-                },
-            },
-            expectations: expectations{
-                message: stream.NewTextMessage(""),
-                err:     nil,
-            },
-        },
-        {
-            name: "Json Message Success",
-            args: args{
-                kafkaMessage: &kafka.Message{
-                    Headers: []kafka.Header{
-                        {
-                            Key:   "DEVKIT_CONTENT_TYPE",
-                            Value: []byte("json"),
-                        },
-                    },
-                },
-            },
-            expectations: expectations{
-                message: stream.NewJsonMessage(nil),
-                err:     nil,
-            },
-        },
-        {
-            name: "Unknown Type Error",
-            args: args{
-                kafkaMessage: &kafka.Message{
-                    Headers: []kafka.Header{
-                        {
-                            Key:   "DEVKIT_CONTENT_TYPE",
-                            Value: []byte("unknown"),
-                        },
-                    },
-                },
-            },
-            expectations: expectations{
-                message: nil,
-                err:     stream.ErrUnknownMessageType,
-            },
-        },
-        {
-            name: "Header Without Type Key Error",
-            args: args{
-                kafkaMessage: &kafka.Message{
-                    Headers: []kafka.Header{},
-                },
-            },
-            expectations: expectations{
-                message: nil,
-                err:     stream.ErrUnknownMessageType,
-            },
-        },
-    }
+	tests := []struct {
+		name         string
+		args         args
+		expectations expectations
+	}{
+		{
+			name: "Text Message Success",
+			args: args{
+				kafkaMessage: &kafka.Message{
+					Headers: []kafka.Header{
+						{
+							Key:   "DEVKIT_CONTENT_TYPE",
+							Value: []byte("text"),
+						},
+					},
+				},
+			},
+			expectations: expectations{
+				message: stream.NewTextMessage(""),
+				err:     nil,
+			},
+		},
+		{
+			name: "Json Message Success",
+			args: args{
+				kafkaMessage: &kafka.Message{
+					Headers: []kafka.Header{
+						{
+							Key:   "DEVKIT_CONTENT_TYPE",
+							Value: []byte("json"),
+						},
+					},
+				},
+			},
+			expectations: expectations{
+				message: stream.NewJsonMessage(nil),
+				err:     nil,
+			},
+		},
+		{
+			name: "Unknown Type Error",
+			args: args{
+				kafkaMessage: &kafka.Message{
+					Headers: []kafka.Header{
+						{
+							Key:   "DEVKIT_CONTENT_TYPE",
+							Value: []byte("unknown"),
+						},
+					},
+				},
+			},
+			expectations: expectations{
+				message: nil,
+				err:     stream.ErrUnknownMessageType,
+			},
+		},
+		{
+			name: "Header Without Type Key Error",
+			args: args{
+				kafkaMessage: &kafka.Message{
+					Headers: []kafka.Header{},
+				},
+			},
+			expectations: expectations{
+				message: nil,
+				err:     stream.ErrUnknownMessageType,
+			},
+		},
+	}
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            message, err := stream.NewMessageType(tt.args.kafkaMessage)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			message, err := stream.NewMessageType(tt.args.kafkaMessage)
 
-            assert.Equal(t, tt.expectations.err, err)
-            assert.IsType(t, tt.expectations.message, message)
-        })
-    }
+			assert.Equal(t, tt.expectations.err, err)
+			assert.IsType(t, tt.expectations.message, message)
+		})
+	}
 }
