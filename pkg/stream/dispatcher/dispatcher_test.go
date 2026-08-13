@@ -52,7 +52,7 @@ func Test_Dispatcher_Dispatch_Success(t *testing.T) {
         Return(nil).
         Once()
 
-    d := dispatcher.NewDispatcher(clientMock)
+    d := dispatcher.New(clientMock)
 
     go func() {
         <-done
@@ -94,7 +94,7 @@ func Test_Dispatcher_Dispatch_Delivery_MsgTimedOutError(t *testing.T) {
         Return(nil).
         Once()
 
-    d := dispatcher.NewDispatcher(clientMock)
+    d := dispatcher.New(clientMock)
 
     go func() {
         <-done
@@ -140,7 +140,7 @@ func Test_Dispatcher_Dispatch_Delivery_UnhandledError(t *testing.T) {
         Return(nil).
         Once()
 
-    d := dispatcher.NewDispatcher(clientMock)
+    d := dispatcher.New(clientMock)
 
     go func() {
         <-done
@@ -187,7 +187,7 @@ func Test_Dispatcher_Dispatch_Kafka_Error(t *testing.T) {
         Return(nil).
         Once()
 
-    d := dispatcher.NewDispatcher(clientMock)
+    d := dispatcher.New(clientMock)
 
     go func() {
         <-done
@@ -231,7 +231,7 @@ func Test_Dispatcher_Dispatch_Delivery_Unexpected_Error(t *testing.T) {
         Return(nil).
         Once()
 
-    d := dispatcher.NewDispatcher(clientMock)
+    d := dispatcher.New(clientMock)
 
     go func() {
         <-done
@@ -259,7 +259,7 @@ func Test_Dispatcher_Dispatch_Client_Produce_Error(t *testing.T) {
         Return(errors.New("unexpected error")).
         Once()
 
-    d := dispatcher.NewDispatcher(clientMock)
+    d := dispatcher.New(clientMock)
 
     err := d.Dispatch(context.Background(), expectedTopic, string(expectedKey), stream.NewTextMessage(expectedMessage))
 
@@ -274,9 +274,9 @@ func Test_Dispatcher_Dispatch_Json_Marshaller_Error(t *testing.T) {
 
     clientMock := &ClientDispatcherClientMock{}
 
-    d := dispatcher.NewDispatcher(clientMock)
+    d := dispatcher.New(clientMock)
 
-    err := d.Dispatch(context.Background(), expectedTopic, expectedKey, stream.NewJsonMessage(make(chan string)))
+    err := d.Dispatch(context.Background(), expectedTopic, expectedKey, stream.NewJSONMessage(make(chan string)))
 
     assert.EqualError(t, err, "dispatcher: json: unsupported type: chan string")
 
@@ -292,7 +292,7 @@ func Test_Dispatcher_Shutdown_Success(t *testing.T) {
         On("Close").
         Once()
 
-    d := dispatcher.NewDispatcher(clientMock)
+    d := dispatcher.New(clientMock)
 
     d.Shutdown()
 

@@ -50,7 +50,7 @@ type dispatcherClient struct {
 	*kafka.Producer
 }
 
-func NewDispatcherClient(options ...Option) (Client, error) {
+func NewClient(options ...Option) (Client, error) {
 	settings := dispatcherSettings{
 		logLevel:         defaultLogLevel,
 		messageTimeoutMs: defaultMessageTimeoutMs,

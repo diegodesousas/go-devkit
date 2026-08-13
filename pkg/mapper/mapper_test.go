@@ -8,7 +8,7 @@ import (
 )
 
 func TestMapperSuccess(t *testing.T) {
-    newMapper := mapper.NewMapper[string, int64]()
+    newMapper := mapper.New[string, int64]()
 
     newMapper.
         Set("t1", int64(100)).
@@ -28,7 +28,7 @@ func TestMapperSuccess_With_Custom_Type_Key(t *testing.T) {
     const T2 CustomKey = "t2"
     const T3 CustomKey = "t3"
 
-    newMapper := mapper.NewMapper[CustomKey, int64]()
+    newMapper := mapper.New[CustomKey, int64]()
 
     newMapper.
         Set(T1, int64(100)).
@@ -42,7 +42,7 @@ func TestMapperSuccess_With_Custom_Type_Key(t *testing.T) {
 }
 
 func TestMapperError(t *testing.T) {
-    newMapper := mapper.NewMapper[string, int64]()
+    newMapper := mapper.New[string, int64]()
 
     newMapper.
         Set("t1", int64(100)).

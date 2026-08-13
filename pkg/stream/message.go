@@ -31,7 +31,7 @@ type jsonMessage struct {
 	Body any
 }
 
-func NewJsonMessage(body any) Message {
+func NewJSONMessage(body any) Message {
 	return jsonMessage{
 		Body: body,
 	}
@@ -59,7 +59,7 @@ func (j jsonMessage) Deserialize(payload []byte, input any) error {
 }
 
 func (j jsonMessage) NewWithData(data any) Message {
-	return NewJsonMessage(data)
+	return NewJSONMessage(data)
 }
 
 type textMessage struct {
@@ -100,7 +100,7 @@ func NewMessageType(message *kafka.Message) (Message, error) {
 		if header.Key == ContentTypeHeaderKey {
 			switch string(header.Value) {
 			case jsonType, postgresType:
-				return NewJsonMessage(message.Value), nil
+				return NewJSONMessage(message.Value), nil
 			case textType:
 				return NewTextMessage(string(message.Value)), nil
 			}

@@ -63,7 +63,7 @@ func Test_JsonSerializer_Serialize(t *testing.T) {
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
-            serializer := encoding.NewJsonSerializer()
+            serializer := encoding.NewJSONSerializer()
 
             serializedData, err := serializer.Serialize(tt.args.value)
 
@@ -80,7 +80,7 @@ func Test_JsonSerializer_Deserialize_Success(t *testing.T) {
         Boolean bool    `json:"boolean"`
     }
 
-    serializer := encoding.NewJsonSerializer()
+    serializer := encoding.NewJSONSerializer()
 
     value := []byte(`{"text":"test","number":9999,"boolean":true}`)
     target := test{}
@@ -104,7 +104,7 @@ func Test_JsonSerializer_Deserialize_Error(t *testing.T) {
         Boolean bool    `json:"boolean"`
     }
 
-    serializer := encoding.NewJsonSerializer()
+    serializer := encoding.NewJSONSerializer()
 
     value := []byte(`{"boolean":999}`)
     target := test{}

@@ -4,14 +4,14 @@ import (
 	"github.com/goccy/go-json"
 )
 
-type JsonSerializer interface {
+type JSONSerializer interface {
 	Serialize(v any) ([]byte, error)
 	Deserialize(data []byte, v any) error
 }
 
 type jsonSerializer struct{}
 
-func NewJsonSerializer() JsonSerializer {
+func NewJSONSerializer() JSONSerializer {
 	return jsonSerializer{}
 }
 

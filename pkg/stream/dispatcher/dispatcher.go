@@ -23,7 +23,7 @@ type dispatcher struct {
 	flushTimeoutMs int
 }
 
-func NewDispatcher(client Client) Dispatcher {
+func New(client Client) Dispatcher {
 	return &dispatcher{
 		client:         client,
 		flushTimeoutMs: defaultFlushTimeoutMs,

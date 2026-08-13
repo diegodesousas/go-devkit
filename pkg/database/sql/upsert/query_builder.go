@@ -22,11 +22,11 @@ type settings struct {
 	constraints            []string
 	insertValues           ColumnMap
 	onConflictUpdateValues ColumnMap
-	onConflictDonNothing   bool
+	onConflictDoNothing    bool
 }
 
 func (s settings) validate() error {
-	if len(s.constraints) == 0 && (len(s.onConflictUpdateValues) > 0 || s.onConflictDonNothing) {
+	if len(s.constraints) == 0 && (len(s.onConflictUpdateValues) > 0 || s.onConflictDoNothing) {
 		return ErrInvalidConstraint
 	}
 
@@ -38,7 +38,7 @@ func (s settings) validate() error {
 		return ErrUpdateValuesIsEmpty
 	}
 
-	if s.onConflictDonNothing && len(s.onConflictUpdateValues) > 0 {
+	if s.onConflictDoNothing && len(s.onConflictUpdateValues) > 0 {
 		return ErrIncompatibleOptions
 	}
 
@@ -81,7 +81,7 @@ func WithOnConflictUpdate(updateValues ColumnMap) Option {
 
 func WithOnConflictDoNothing() Option {
 	return func(settings settings) settings {
-		settings.onConflictDonNothing = true
+		settings.onConflictDoNothing = true
 
 		return settings
 	}
@@ -110,7 +110,7 @@ func Build(options ...Option) (query string, args []any, err error) {
 		SetMap(s.insertValues).
 		PlaceholderFormat(squirrel.Dollar)
 
-	if s.onConflictDonNothing {
+	if s.onConflictDoNothing {
 		insertBuilder = insertBuilder.Suffix(onConflictInstruction + " NOTHING")
 	}
 

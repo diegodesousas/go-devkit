@@ -2,7 +2,7 @@ package httpclient
 
 import "net/http"
 
-type HttpClient interface {
+type Client interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
@@ -10,7 +10,7 @@ type httpClient struct {
 	client *http.Client
 }
 
-func New() HttpClient {
+func New() Client {
 	return httpClient{
 		client: http.DefaultClient,
 	}

@@ -69,7 +69,7 @@ func WithLevel(level Level) Option {
 	}
 }
 
-func WithJsonFormat() Option {
+func WithJSONFormat() Option {
 	return func(o *settings) {
 		o.format = &logrus.JSONFormatter{}
 	}

@@ -75,14 +75,14 @@ func (b basicHandler[T]) ConfigRetry() consumer.ConfigRetry {
 func main() {
     ctx := context.Background()
 
-    dispatcherClient, err := dispatcher.NewDispatcherClient(
+    dispatcherClient, err := dispatcher.NewClient(
         dispatcher.WithBootstrapServers("localhost:9092"),
     )
     if err != nil {
         log.Fatal(ctx, err.Error())
     }
 
-    d := dispatcher.NewDispatcher(dispatcherClient)
+    d := dispatcher.New(dispatcherClient)
     defer d.Shutdown()
 
     f := consumer.NewFactory(
@@ -93,7 +93,7 @@ func main() {
 
     logger := log.New(log.WithLevel(log.DebugLevel))
 
-    c, err := consumer.NewConsumer[Message](d, f, handler, consumer.WithLogger(logger))
+    c, err := consumer.New[Message](d, f, handler, consumer.WithLogger(logger))
     if err != nil {
         log.Fatal(ctx, err.Error())
     }

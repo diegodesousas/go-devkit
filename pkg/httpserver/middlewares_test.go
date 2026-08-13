@@ -125,7 +125,7 @@ func TestLoggerWithTraceID(t *testing.T) {
 }
 
 func TestContentTypeJson(t *testing.T) {
-	middleware := httpserver.ContentTypeJson()
+	middleware := httpserver.ContentTypeJSON()
 
 	writerMock := httptest.NewRecorder()
 
