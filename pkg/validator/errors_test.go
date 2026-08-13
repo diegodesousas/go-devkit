@@ -30,6 +30,30 @@ func Test_Validator_Errors(t *testing.T) {
 			},
 		},
 		{
+			name: "Invalid Error with an int value",
+			err:  validator.NewInvalidError("age", 42),
+			want: validator.Error{
+				Code:    "invalid",
+				Message: "value 42 for attribute age is invalid",
+			},
+		},
+		{
+			name: "Invalid Error with a bool value",
+			err:  validator.NewInvalidError("active", false),
+			want: validator.Error{
+				Code:    "invalid",
+				Message: "value false for attribute active is invalid",
+			},
+		},
+		{
+			name: "Invalid Error with a struct value",
+			err:  validator.NewInvalidError("range", struct{ Min int }{Min: 3}),
+			want: validator.Error{
+				Code:    "invalid",
+				Message: "value {3} for attribute range is invalid",
+			},
+		},
+		{
 			name: "Not Found Error",
 			err:  validator.NewNotFoundError("abc"),
 			want: validator.Error{

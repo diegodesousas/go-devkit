@@ -92,7 +92,7 @@ func (t textMessage) Deserialize(payload []byte, input any) error {
 }
 
 func (t textMessage) NewWithData(data any) Message {
-	return NewTextMessage(fmt.Sprintf("%s", data))
+	return NewTextMessage(fmt.Sprintf("%v", data))
 }
 
 func NewMessageType(message *kafka.Message) (Message, error) {

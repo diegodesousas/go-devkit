@@ -157,6 +157,48 @@ func TestTextMessage_NewWithData_Success(t *testing.T) {
 	assert.IsType(t, message, newMessage)
 }
 
+func TestTextMessage_NewWithData_NonStringContent(t *testing.T) {
+	// The dead letter path builds a text message out of whatever the handler
+	// was given, so non-string content has to render readably rather than as
+	// a %!s(int=42) verb error.
+	tests := []struct {
+		name     string
+		data     any
+		expected string
+	}{
+		{
+			name:     "int",
+			data:     42,
+			expected: "42",
+		},
+		{
+			name:     "bool",
+			data:     true,
+			expected: "true",
+		},
+		{
+			name:     "struct",
+			data:     struct{ Name string }{Name: "devkit"},
+			expected: "{devkit}",
+		},
+		{
+			name:     "string",
+			data:     "already text",
+			expected: "already text",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			newMessage := stream.NewTextMessage("").NewWithData(tt.data)
+
+			payload, err := newMessage.Serialize()
+			assert.Nil(t, err)
+			assert.Equal(t, tt.expected, string(payload))
+		})
+	}
+}
+
 func TestJSONMessage_NewWithData_Success(t *testing.T) {
 	message := stream.NewJsonMessage(nil)
 
