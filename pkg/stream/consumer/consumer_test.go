@@ -1351,6 +1351,8 @@ func TestConsumer_DefaultLogger_WithTraceID(t *testing.T) {
 
 	dispatcherMock := &DispatcherMock{}
 
+	committed := make(chan struct{}, 2)
+
 	clientMock := &ClientMock{}
 	clientMock.
 		On("Subscribe", expectedTopic, mock.Anything).
@@ -1359,10 +1361,18 @@ func TestConsumer_DefaultLogger_WithTraceID(t *testing.T) {
 		On("ReadMessage", expectedDefaultReadMessageTimeout).
 		Return(expectedKafkaMessage, nil).
 		Twice().
+		// Any poll past the two expected messages answers as an idle broker
+		// would, so the consumer looping once more while shutting down is
+		// harmless instead of exhausting the mock.
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, kafka.NewError(kafka.ErrTimedOut, "", false)).
 		On("Close").
 		Return(nil).
 		Once().
 		On("CommitMessage", expectedKafkaMessage).
+		Run(func(mock.Arguments) {
+			committed <- struct{}{}
+		}).
 		Return([]kafka.TopicPartition{}, nil).
 		Twice()
 
@@ -1389,7 +1399,7 @@ func TestConsumer_DefaultLogger_WithTraceID(t *testing.T) {
 	shutdown, err := c.Run()
 	assert.Nil(t, err)
 
-	time.Sleep(time.Millisecond * 4)
+	waitForCalls(t, committed, 2)
 	shutdown()
 	assert.Nil(t, err)
 

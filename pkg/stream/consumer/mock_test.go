@@ -2,6 +2,7 @@ package consumer_test
 
 import (
 	"context"
+	"testing"
 	"time"
 
 	"github.com/confluentinc/confluent-kafka-go/kafka"
@@ -10,6 +11,30 @@ import (
 	"github.com/diegodesousas/go-devkit/pkg/stream/consumer"
 	"github.com/stretchr/testify/mock"
 )
+
+// waitForCallsTimeout only has to be long enough to rule out a genuine hang.
+// It is never reached on a healthy run, so a generous value costs nothing and
+// keeps loaded CI runners out of trouble.
+const waitForCallsTimeout = time.Second * 2
+
+// waitForCalls blocks until the consumer goroutine has signalled count calls.
+//
+// The consumer processes messages on its own goroutine, so a test that sleeps
+// a fixed duration before calling shutdown is betting on the scheduler twice
+// over: sleep too little and the expected calls have not happened yet, sleep
+// too much and the loop polls once more than the mock allows. Waiting on the
+// call itself removes both bets.
+func waitForCalls(t *testing.T, calls <-chan struct{}, count int) {
+	timeout := time.After(waitForCallsTimeout)
+
+	for i := 0; i < count; i++ {
+		select {
+		case <-calls:
+		case <-timeout:
+			t.Fatalf("timed out waiting for call %d of %d", i+1, count)
+		}
+	}
+}
 
 type DispatcherMock struct {
 	mock.Mock
