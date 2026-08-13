@@ -83,10 +83,19 @@ A suíte é **ordem-dependente por construção**: `TestTransactionContext_Commi
 
 **`pkg/cache` e `pkg/metrics` não têm nenhum teste.** `metrics.New()` tem `"localhost:8125"` hardcoded.
 
+**Subir o Go obriga a subir o golangci-lint junto.** O binário aborta antes de lintar quando foi buildado com um Go anterior ao alvo do `go.mod`:
+
+```
+can't load config: the Go language version (go1.24) used to build
+golangci-lint is lower than the targeted Go version (1.26.0)
+```
+
+Ao mexer na diretiva `go`, confira `golangci-lint --version` e atualize com `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<versão>` — o `version:` do `lint.yml` tem que acompanhar.
+
 ## Dívida conhecida (não mexer sem pedir)
 
-- **Não existe `.golangci.yml`.** O CI roda golangci-lint **v1.55.2** com os linters default e `only-new-issues: true`; o binário local é **v1.64.8**. Divergência entre local e CI é esperada.
-- **Os workflows pinam `go-version: '1.21'`, mas `go.mod` declara `go 1.24.0`.** Funciona só porque o toolchain switching automático baixa o 1.24 em silêncio — o pin é ficção, e custa um download por job (`cache: false`).
-- **34 dos 80 arquivos `.go` falham no `gofmt -l`** (indentados com espaços, herança do `.editorconfig` antigo). Não reformate em massa: o hook de `PostToolUse` normaliza cada arquivo conforme for editado.
+- **Não existe `.golangci.yml`** — valem os linters default do golangci-lint v2, em que o `gosimple` foi absorvido pelo `staticcheck`. CI e local rodam a mesma versão, **v2.12.2** (no CI via `golangci-lint-action@v8`, com `only-new-issues: true`).
+- **Os workflows usam `cache: false`**, então cada job baixa as dependências do zero.
+- **28 dos 64 arquivos `.go` falham no `gofmt -l`** (indentados com espaços, herança do `.editorconfig` antigo). Não reformate em massa: o hook de `PostToolUse` normaliza cada arquivo conforme for editado.
 - O coverprofile do CI é gerado e descartado — sem upload, sem threshold.
 - Inconsistências de nomenclatura já existentes: `server_options.go` (plural) vs `client_option.go` (singular); `GeneralErr` em `pkg/database/sql/errors.go` foge do prefixo `Err`; campo `onConflictDonNothing` (typo) em `upsert`.
