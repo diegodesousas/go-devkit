@@ -1090,6 +1090,61 @@ func TestConsumer_ReadMessage_HandleKafkaError(t *testing.T) {
 	handlerMock.AssertExpectations(t)
 }
 
+func TestConsumer_ReadMessage_HandleNonKafkaError(t *testing.T) {
+	var (
+		expectedErr                       = errors.New("unexpected non kafka error")
+		expectedGroupID                   = "devkit-group-id"
+		expectedHandlerID                 = "group-id"
+		expectedTopic                     = "test-topic"
+		expectedDefaultReadMessageTimeout = time.Millisecond * 100
+	)
+
+	dispatcherMock := &DispatcherMock{}
+
+	clientMock := &ClientMock{}
+	clientMock.
+		On("Subscribe", expectedTopic, mock.Anything).
+		Return(nil).
+		Once().
+		On("ReadMessage", expectedDefaultReadMessageTimeout).
+		Return(&kafka.Message{}, expectedErr).
+		Once().
+		On("Close").
+		Return(nil).
+		Once()
+
+	factoryMock := &FactoryMock{}
+	factoryMock.
+		On("New", expectedGroupID).
+		Return(clientMock, nil).
+		Once()
+
+	handlerMock := &HandlerTextMock[string]{}
+	handlerMock.
+		On("ID").
+		Return(expectedHandlerID).
+		Once().
+		On("Topic").
+		Return(expectedTopic).
+		Once()
+
+	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	assert.Nil(t, err)
+
+	shutdown, err := c.Run()
+	assert.Nil(t, err)
+
+	err = <-c.ListenShutdown()
+	assert.Equal(t, expectedErr, err)
+
+	shutdown()
+
+	dispatcherMock.AssertExpectations(t)
+	clientMock.AssertExpectations(t)
+	factoryMock.AssertExpectations(t)
+	handlerMock.AssertExpectations(t)
+}
+
 func TestConsumer_CommitMessageError(t *testing.T) {
 	var (
 		expectedErr                       = errors.New("unexpected commit message error")
