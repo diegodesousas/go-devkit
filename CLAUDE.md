@@ -26,6 +26,8 @@ O alvo aborta antes de criar qualquer coisa se: não estiver na `main`, a workin
 
 **`test-integration` fica de fora de propósito**, para o release não exigir Docker. Se a versão mexe em `pkg/database/sql`, rode `make test-all` antes.
 
+Por que isso é um alvo de `make` e não `svu`, `release-please` ou GoReleaser: [docs/decisions/0001-release-tooling.md](docs/decisions/0001-release-tooling.md). **Não reabra essa escolha sem pedir.**
+
 ## Fluxo de trabalho git
 
 **Nenhuma implementação nova vai direto na `main`** — nem correção de uma linha. Antes da primeira edição: `git checkout main && git pull`, depois `git checkout -b <tipo>/<descricao>`.
