@@ -187,7 +187,7 @@ func NewLogRequest(route, method string, main http.Handler) http.Handler {
 
 		logger := log.FromContext(ctx)
 		now := time.Now()
-		rw := &responseWriter{ResponseWriter: w}
+		rw := newResponseWriter(w)
 
 		defer func() {
 			milliseconds := time.Since(now).Milliseconds()
@@ -227,10 +227,34 @@ func NewLogRequest(route, method string, main http.Handler) http.Handler {
 
 type responseWriter struct {
 	http.ResponseWriter
-	status int
+	status      int
+	wroteHeader bool
 }
 
+// newResponseWriter wraps w starting at http.StatusOK, which is the status
+// net/http sends when a handler writes a body without calling WriteHeader.
+// Starting at zero instead would report status:0 for every plain 200.
+func newResponseWriter(w http.ResponseWriter) *responseWriter {
+	return &responseWriter{
+		ResponseWriter: w,
+		status:         http.StatusOK,
+	}
+}
+
+// WriteHeader records only the first status, which is the one the client
+// actually receives - net/http ignores any later call.
 func (rw *responseWriter) WriteHeader(code int) {
-	rw.status = code
+	if !rw.wroteHeader {
+		rw.status = code
+		rw.wroteHeader = true
+	}
+
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Unwrap exposes the wrapped ResponseWriter so http.ResponseController can
+// reach the Flusher, Hijacker and deadline setters behind it. Without it,
+// wrapping the writer silently breaks SSE, WebSocket upgrades and streaming.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
 }
