@@ -13,8 +13,18 @@ Não há binário — só `pkg/` (a lib) e `examples/` (um `package main` por re
 | `make test-all` | Os dois |
 | `make lint` | `gofmt -l` + `go vet ./...` + `golangci-lint run` |
 | `make fmt` | `gofmt -w` em `./pkg` e `./examples` |
+| `make next-version [BUMP=…]` | Só imprime a próxima versão. Não escreve nada — serve para conferir o cálculo |
+| `make release [BUMP=…]` | Corta a versão: valida, testa, cria a tag anotada, dá push e abre o GitHub Release |
 
 `CGO_ENABLED=1` é obrigatório: `confluent-kafka-go v1.9.2` embute librdkafka via cgo, e `-race` também depende disso.
+
+## Release
+
+`make release` deriva a versão do último tag: `BUMP` ∈ `patch` (default), `minor`, `major`. `VERSION=v1.2.3` sobrescreve o cálculo e ignora o `BUMP`. `make next-version` roda a mesma lógica sem efeito nenhum.
+
+O alvo aborta antes de criar qualquer coisa se: não estiver na `main`, a working tree estiver suja, `HEAD` divergir de `origin/main` (ele dá `git fetch` antes), ou a tag já existir — local ou remota. Passando por tudo, roda `make test`, `make lint`, cria a tag anotada, faz `git push` dela e chama `gh release create --generate-notes`.
+
+**`test-integration` fica de fora de propósito**, para o release não exigir Docker. Se a versão mexe em `pkg/database/sql`, rode `make test-all` antes.
 
 ## Fluxo de trabalho git
 
