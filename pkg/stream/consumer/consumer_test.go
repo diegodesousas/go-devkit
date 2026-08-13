@@ -87,7 +87,7 @@ func TestConsumer_ProcessMessageSuccessfully(t *testing.T) {
 		Return(nil).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -169,7 +169,7 @@ func TestConsumer_ProcessMessageSuccessfullyWithSkip(t *testing.T) {
 		Return(true).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -289,7 +289,7 @@ func TestConsumer_ProcessMessageSuccessfullyWithRetry(t *testing.T) {
 		Return(nil).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -394,7 +394,7 @@ func TestConsumer_ProcessMessageFailedRetry(t *testing.T) {
 		Return(retryableErr).
 		Times(3)
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -490,7 +490,7 @@ func TestConsumer_ProcessMessageFailedRetry_DispatchToDeadLetterFails(t *testing
 		Return(retryableErr).
 		Times(3)
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -599,7 +599,7 @@ func TestConsumer_ProcessMessageFailedWithoutRetry(t *testing.T) {
 		Return(nonRetryableErr).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -698,7 +698,7 @@ func TestConsumer_ProcessMessageFailedWithoutRetry_DispatchToDeadLetterFails(t *
 		Return(nonRetryableErr).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -781,7 +781,7 @@ func TestConsumer_ProcessMessageFailed_NotAbleToDefineMessageType(t *testing.T) 
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -850,7 +850,7 @@ func TestConsumer_ProcessMessageFailed_NotAbleToDefineMessageType_DispatchToDead
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -938,7 +938,7 @@ func TestConsumer_ProcessMessageFailed_DeserializeError(t *testing.T) {
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[jsonMessageTest](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[jsonMessageTest](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -1012,7 +1012,7 @@ func TestConsumer_ProcessMessageFailed_DeserializeError_DispatchToDeadLetterFail
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[jsonMessageTest](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[jsonMessageTest](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -1073,7 +1073,7 @@ func TestConsumer_ReadMessage_HandleKafkaTimeoutError(t *testing.T) {
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -1126,7 +1126,7 @@ func TestConsumer_ReadMessage_HandleKafkaError(t *testing.T) {
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -1181,7 +1181,7 @@ func TestConsumer_ReadMessage_HandleNonKafkaError(t *testing.T) {
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -1258,7 +1258,7 @@ func TestConsumer_CommitMessageError(t *testing.T) {
 		Return(nil).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -1302,7 +1302,7 @@ func TestConsumer_FactoryError(t *testing.T) {
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Error(t, expectedErr, err)
 	assert.Nil(t, c)
 
@@ -1344,7 +1344,7 @@ func TestConsumer_SubscribeError(t *testing.T) {
 		Return(expectedTopic).
 		Once()
 
-	c, err := consumer.NewConsumer[string](dispatcherMock, factoryMock, handlerMock)
+	c, err := consumer.New[string](dispatcherMock, factoryMock, handlerMock)
 	assert.Nil(t, err)
 
 	shutdown, err := c.Run()
@@ -1440,7 +1440,7 @@ func TestConsumer_DefaultLogger_WithTraceID(t *testing.T) {
 		log.WithOutput(testOutput),
 	)
 
-	c, err := consumer.NewConsumer[string](
+	c, err := consumer.New[string](
 		dispatcherMock,
 		factoryMock,
 		logHandler[string]{},

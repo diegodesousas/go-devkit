@@ -19,14 +19,14 @@ type Message struct {
 }
 
 func main() {
-    client, err := dispatcher.NewDispatcherClient(
+    client, err := dispatcher.NewClient(
         dispatcher.WithBootstrapServers("localhost:9092"),
     )
     if err != nil {
         log.Fatal(err)
     }
 
-    d := dispatcher.NewDispatcher(client)
+    d := dispatcher.New(client)
 
     event := Message{
         ID:     "00",
@@ -43,7 +43,7 @@ func main() {
             <-tick
 
             log.Printf("Try dispatch message")
-            if err := d.Dispatch(context.Background(), topic, event.ID, stream.NewJsonMessage(event)); err != nil {
+            if err := d.Dispatch(context.Background(), topic, event.ID, stream.NewJSONMessage(event)); err != nil {
                 log.Print(err)
                 continue
             }

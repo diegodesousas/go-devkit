@@ -33,7 +33,7 @@ func main() {
     debugLogger.Debug("This one will print")
 
     // passing and retrieving a logger json formatted logger from a context
-    jsonLogger := log.New(log.WithJsonFormat())
+    jsonLogger := log.New(log.WithJSONFormat())
     ctx = context.Background()
     ctx = log.WithLogger(ctx, jsonLogger)
     log.Info(ctx, "Error level message")

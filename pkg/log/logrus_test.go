@@ -35,7 +35,7 @@ func TestWithExitFunc(t *testing.T) {
 
 func TestWithJsonFormat(t *testing.T) {
     buf := &bytes.Buffer{}
-    logger := log.New(log.WithOutput(buf), log.WithJsonFormat())
+    logger := log.New(log.WithOutput(buf), log.WithJSONFormat())
     logger.WithFields(log.Field{Key: "RequestID", Value: "XXX-XXX"}).Info("Test")
     t.Log(buf.String())
     gotMessage := logMessage{}

@@ -30,7 +30,7 @@ func TestMessage_Type(t *testing.T) {
 		},
 		{
 			name:    "JSON message type",
-			message: stream.NewJsonMessage("test"),
+			message: stream.NewJSONMessage("test"),
 			expectations: expectations{
 				messageType: "json",
 			},
@@ -63,14 +63,14 @@ func TestMessage_Serialize(t *testing.T) {
 		},
 		{
 			name:    "JSON serialization success",
-			message: stream.NewJsonMessage(`{"test": "test"}`),
+			message: stream.NewJSONMessage(`{"test": "test"}`),
 			expectations: expectations{
 				serializedData: []byte(`"{\"test\": \"test\"}"`),
 			},
 		},
 		{
 			name:    "JSON serialization error",
-			message: stream.NewJsonMessage(make(chan string)),
+			message: stream.NewJSONMessage(make(chan string)),
 			expectations: expectations{
 				serializedData: nil,
 				err:            &json.UnsupportedTypeError{Type: reflect.TypeOf(make(chan string))},
@@ -116,7 +116,7 @@ func TestJSONMessage_Deserialize_Success(t *testing.T) {
 		Number int `json:"number"`
 	}
 
-	message := stream.NewJsonMessage(nil)
+	message := stream.NewJSONMessage(nil)
 
 	var output Test
 	input := []byte(`{"number": 10}`)
@@ -132,7 +132,7 @@ func TestJSONMessage_Deserialize_Success(t *testing.T) {
 }
 
 func TestJSONMessage_Deserialize_Error(t *testing.T) {
-	message := stream.NewJsonMessage(nil)
+	message := stream.NewJSONMessage(nil)
 
 	output := make(chan string)
 
@@ -200,7 +200,7 @@ func TestTextMessage_NewWithData_NonStringContent(t *testing.T) {
 }
 
 func TestJSONMessage_NewWithData_Success(t *testing.T) {
-	message := stream.NewJsonMessage(nil)
+	message := stream.NewJSONMessage(nil)
 
 	data := "json string"
 
@@ -254,7 +254,7 @@ func TestNewMessageType(t *testing.T) {
 				},
 			},
 			expectations: expectations{
-				message: stream.NewJsonMessage(nil),
+				message: stream.NewJSONMessage(nil),
 				err:     nil,
 			},
 		},

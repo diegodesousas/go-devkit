@@ -26,9 +26,9 @@ var (
 	// for example: 'INSERT INTO deals (affiliate_id, value) VALUES ($1, $2)', where $1 is missing.
 	ErrNoParameter = errors.New("no parameter 42P02")
 
-	// GeneralErr represents any err that has not been mapped yet, the err then should be asserted to
+	// ErrGeneral represents any err that has not been mapped yet, the err then should be asserted to
 	// the pgconn.PgError type.
-	GeneralErr = errors.New("something went wrong")
+	ErrGeneral = errors.New("something went wrong")
 )
 
 func pgErrWrapper(err error) error {
@@ -47,6 +47,6 @@ func pgErrWrapper(err error) error {
 	case "42P02":
 		return errors.Wrap(ErrNoParameter, pgErr.Message)
 	default:
-		return errors.Wrap(GeneralErr, err.Error())
+		return errors.Wrap(ErrGeneral, err.Error())
 	}
 }

@@ -42,7 +42,7 @@ type defaultConsumer[T any] struct {
 	topic            string
 }
 
-func NewConsumer[T any](
+func New[T any](
 	dispatcher dispatcher.Dispatcher,
 	factory Factory,
 	handler Handler[T],

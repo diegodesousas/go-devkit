@@ -20,8 +20,8 @@ func TestWithBootstrapServers_Success(t *testing.T) {
 	assert.Equal(t, expectedSettings, settings)
 }
 
-func TestNewDispatcherClient_Success(t *testing.T) {
-	client, err := NewDispatcherClient(
+func TestNewClient_Success(t *testing.T) {
+	client, err := NewClient(
 		WithLogLevel(0),
 	)
 
@@ -29,8 +29,8 @@ func TestNewDispatcherClient_Success(t *testing.T) {
 	assert.Nil(t, err)
 }
 
-func TestNewDispatcherClient_Success_WithOptions(t *testing.T) {
-	client, err := NewDispatcherClient(
+func TestNewClient_Success_WithOptions(t *testing.T) {
+	client, err := NewClient(
 		WithBootstrapServers("test:9999"),
 		WithLogLevel(0),
 	)

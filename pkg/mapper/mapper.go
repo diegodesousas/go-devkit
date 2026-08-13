@@ -9,7 +9,7 @@ type Mapper[K ~string, T any] interface {
 	Get(k K) (value T, err error)
 }
 
-func NewMapper[K ~string, T any]() Mapper[K, T] {
+func New[K ~string, T any]() Mapper[K, T] {
 	return mapper[K, T]{
 		list: make(map[K]T),
 	}
