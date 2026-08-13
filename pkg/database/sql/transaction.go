@@ -30,10 +30,10 @@ func (t *tx) Select(ctx context.Context, dest interface{}, query string, args ..
 func (t *tx) Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
 	res, err := t.tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		return res, pgErrWrapper(err)
+		return nil, pgErrWrapper(err)
 	}
 
-	return nil, nil
+	return res, nil
 }
 
 func (t *tx) Commit() error {

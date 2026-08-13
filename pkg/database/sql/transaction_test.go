@@ -29,10 +29,17 @@ func TestSuccessfulTransaction(t *testing.T) {
 	tx, err := db.Begin(ctx)
 	require.NoError(t, err)
 
-	_, err = tx.Exec(ctx, updateQuery, 110, 1)
+	res, err := tx.Exec(ctx, updateQuery, 110, 1)
 	require.NoError(t, err)
-	_, err = tx.Exec(ctx, updateQuery, 120, 1)
+	require.NotNil(t, res, "tx.Exec must return the sql.Result, not nil")
+
+	affected, err := res.RowsAffected()
 	require.NoError(t, err)
+	assert.EqualValues(t, 1, affected)
+
+	res, err = tx.Exec(ctx, updateQuery, 120, 1)
+	require.NoError(t, err)
+	require.NotNil(t, res)
 
 	gotDeal := &mockDeal{}
 
