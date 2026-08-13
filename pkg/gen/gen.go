@@ -1,7 +1,8 @@
 package gen
 
 import (
-	"fmt"
+	"strconv"
+	"sync/atomic"
 
 	"github.com/google/uuid"
 	"github.com/oklog/ulid/v2"
@@ -22,11 +23,9 @@ func ULIDGenerator() StringGenerator {
 }
 
 func SequenceGenerator() StringGenerator {
-	var sequence = 0
+	var sequence atomic.Int64
 
 	return func() string {
-		sequence = sequence + 1
-
-		return fmt.Sprintf("%d", sequence)
+		return strconv.FormatInt(sequence.Add(1), 10)
 	}
 }
