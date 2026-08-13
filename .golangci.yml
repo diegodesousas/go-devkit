@@ -1,0 +1,53 @@
+version: "2"
+
+linters:
+  # Keeps the v2 defaults (errcheck, govet, ineffassign, staticcheck, unused)
+  # and adds the four below.
+  default: standard
+  enable:
+    # Catches type assertions and comparisons on errors that ignore wrapping.
+    # This is the class of bug that panicked the Kafka consumer and left
+    # Postgres errors unmapped, and the pkg/errors convention makes it easy to
+    # reintroduce.
+    - errorlint
+    # HTTP response bodies that are never closed leak connections.
+    - bodyclose
+    # HTTP requests built without a context cannot be cancelled or timed out.
+    - noctx
+    # Security checks on production surface: credentials, weak randomness,
+    # unhandled redirects.
+    - gosec
+
+  settings:
+    errorlint:
+      # The repo wraps with pkg/errors, never with %w, so the verb check has
+      # nothing to find and would only produce noise.
+      errorf: false
+
+  exclusions:
+    rules:
+      # Tests construct their own errors, assert on concrete types, and build
+      # requests with httptest helpers that take no context. None of that is
+      # what these linters are meant to catch.
+      - path: _test\.go
+        linters:
+          - errorlint
+          - gosec
+          - bodyclose
+          - noctx
+
+      # Connection.Ping has no ctx parameter, so it cannot call PingContext
+      # without changing the exported interface. Tracked as a backlog item
+      # (refactor/sql-error-preservation); remove this once it lands.
+      - path: pkg/database/sql/connection\.go
+        text: "\\(\\*database/sql\\.DB\\)\\.Ping must not be called"
+        linters:
+          - noctx
+
+      # G704 flags requests whose URL comes from the caller. That is the entire
+      # contract of a generic HTTP client wrapper - the caller builds the
+      # *http.Request - so the check cannot be satisfied here.
+      - path: pkg/httpclient/client\.go
+        text: "G704"
+        linters:
+          - gosec
