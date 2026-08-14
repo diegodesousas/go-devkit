@@ -13,6 +13,10 @@ const (
 	defaultFlushTimeoutMs int = 1000
 )
 
+// Dispatcher publishes messages to Kafka.
+//
+// Dispatch blocks until the broker confirms the message. Shutdown flushes and
+// closes the underlying producer and must be called before the process exits.
 type Dispatcher interface {
 	Dispatch(ctx context.Context, topic string, key string, content stream.Message) error
 	Shutdown()
@@ -23,6 +27,7 @@ type dispatcher struct {
 	flushTimeoutMs int
 }
 
+// New returns a Dispatcher publishing through client.
 func New(client Client) Dispatcher {
 	return &dispatcher{
 		client:         client,

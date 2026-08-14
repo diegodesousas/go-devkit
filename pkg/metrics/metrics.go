@@ -18,10 +18,17 @@ type metricKey struct{}
 // emit this metric".
 const defaultRate = 1.0
 
+// Metric is the StatsD client. It aliases the full datadog-go client
+// interface, so a substitute has to implement every method - in practice this
+// is satisfied by a real client, not a hand-written fake.
 type Metric interface {
 	statsd.ClientInterface
 }
 
+// New connects to the Datadog agent.
+//
+// The address is fixed at localhost:8125 - the usual agent endpoint for a
+// sidecar or host-local agent, but not configurable.
 func New() (Metric, error) {
 	return statsd.New("localhost:8125")
 }
@@ -39,6 +46,11 @@ func fromContext(ctx context.Context) Metric {
 	return metric
 }
 
+// Increment adds one to the named counter, tagged with tags.
+//
+// It is a no-op when ctx carries no Metric, so a metric that never reaches
+// Datadog usually means the Metrics middleware was not installed. Emission
+// failures are logged, not returned.
 func Increment(ctx context.Context, name string, tags ...string) {
 	if metric := fromContext(ctx); metric != nil {
 		err := metric.Incr(name, tags, defaultRate)
@@ -48,6 +60,8 @@ func Increment(ctx context.Context, name string, tags ...string) {
 	}
 }
 
+// Histogram records value in the named histogram at the given sample rate
+// (1 emits every point). No-op when ctx carries no Metric.
 func Histogram(ctx context.Context, name string, value float64, rate float64, tags ...string) {
 	if metric := fromContext(ctx); metric != nil {
 		err := metric.Histogram(name, value, tags, rate)
@@ -57,6 +71,8 @@ func Histogram(ctx context.Context, name string, value float64, rate float64, ta
 	}
 }
 
+// Gauge sets the named gauge to value at the given sample rate (1 emits every
+// point). No-op when ctx carries no Metric.
 func Gauge(ctx context.Context, name string, value float64, rate float64, tags ...string) {
 	if metric := fromContext(ctx); metric != nil {
 		err := metric.Gauge(name, value, tags, rate)
@@ -66,6 +82,11 @@ func Gauge(ctx context.Context, name string, value float64, rate float64, tags .
 	}
 }
 
+// Metrics returns middleware putting metric in the request context, which is
+// what makes Increment, Histogram and Gauge work downstream.
+//
+// It is the only injection point in this package, so code outside an HTTP
+// request - Kafka consumers, background jobs - currently has no way to emit.
 func Metrics(metric Metric) func(handler http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

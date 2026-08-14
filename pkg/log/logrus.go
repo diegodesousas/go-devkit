@@ -29,8 +29,13 @@ type settings struct {
 	exitFunc func(code int)
 }
 
+// Option configures a Logger built by New.
+//
+// Unlike the options elsewhere in this repository, these mutate a settings
+// pointer. That is historical - do not copy the shape into new packages.
 type Option func(*settings)
 
+// New returns a Logger writing to stderr at info level in text format.
 func New(options ...Option) Logger {
 	settings := settings{
 		level:    logrus.InfoLevel,
@@ -54,6 +59,8 @@ func New(options ...Option) Logger {
 	}
 }
 
+// WithLevel sets the minimum severity emitted. An unrecognised Level is
+// ignored, leaving the default.
 func WithLevel(level Level) Option {
 	return func(o *settings) {
 		switch level {
@@ -69,18 +76,24 @@ func WithLevel(level Level) Option {
 	}
 }
 
+// WithJSONFormat switches the output from text to JSON, which is what a log
+// collector wants.
 func WithJSONFormat() Option {
 	return func(o *settings) {
 		o.format = &logrus.JSONFormatter{}
 	}
 }
 
+// WithOutput redirects entries to output. Defaults to os.Stderr; a bytes.Buffer
+// makes the output assertable in tests.
 func WithOutput(output io.Writer) Option {
 	return func(o *settings) {
 		o.output = output
 	}
 }
 
+// WithExitFunc replaces the function Fatal calls after writing its entry.
+// Defaults to os.Exit; substitute it to keep a test process alive.
 func WithExitFunc(exitFunc func(code int)) Option {
 	return func(o *settings) {
 		o.exitFunc = exitFunc
@@ -134,10 +147,17 @@ func toLogFields(fields ...Field) logrus.Fields {
 	return newFields
 }
 
+// WithLogger returns a context carrying logger, to be read back with
+// FromContext.
 func WithLogger(ctx context.Context, logger Logger) context.Context {
 	return context.WithValue(ctx, loggerKey, logger)
 }
 
+// FromContext returns the Logger carried by ctx.
+//
+// When ctx carries none it returns a logger built with the package defaults, so
+// the result is never nil - but also never the application configuration. A
+// missing Logger middleware shows up as entries in text format on stderr.
 func FromContext(ctx context.Context) Logger {
 	logger, ok := ctx.Value(loggerKey).(Logger)
 
@@ -148,6 +168,9 @@ func FromContext(ctx context.Context) Logger {
 	return logger
 }
 
+// WithFields returns a context whose logger carries fields in addition to
+// whatever it already had, so a value attached once at the edge appears on every
+// later entry.
 func WithFields(ctx context.Context, fields ...Field) context.Context {
 	return WithLogger(
 		ctx,
