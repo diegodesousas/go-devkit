@@ -11,6 +11,7 @@ import (
 	"github.com/diegodesousas/go-devkit/pkg/log"
 	"github.com/diegodesousas/go-devkit/pkg/stream/consumer"
 	"github.com/diegodesousas/go-devkit/pkg/stream/dispatcher"
+	"github.com/diegodesousas/go-devkit/pkg/stream/kafka"
 	"github.com/pkg/errors"
 )
 
@@ -27,25 +28,9 @@ func (m Message) String() string {
 var RetryableError = errors.New("retryable error")
 
 // {"id": "123", "test": true, "amount": 100}
-type basicHandler[T Message] struct{}
+type basicHandler struct{}
 
-func newTopicHandler() *basicHandler[Message] {
-	return &basicHandler[Message]{}
-}
-
-func (b basicHandler[T]) Topic() string {
-	return "externaldb.public.bet-events"
-}
-
-func (b basicHandler[T]) ID() string {
-	return "basic-consumer"
-}
-
-func (b basicHandler[T]) ShouldSkip(content Message) bool {
-	return false
-}
-
-func (b basicHandler[T]) Handle(ctx context.Context, content Message) error {
+func (b basicHandler) Handle(ctx context.Context, content Message) error {
 	log.Infof(ctx, "Processing Message: %s.", content)
 	defer log.Info(ctx, "Message processed.")
 	time.Sleep(time.Second * 5)
@@ -61,60 +46,54 @@ func (b basicHandler[T]) Handle(ctx context.Context, content Message) error {
 	return nil
 }
 
-func (b basicHandler[T]) ConfigRetry() consumer.ConfigRetry {
-	return consumer.ConfigRetry{
-		RetryableErrors: []error{
-			RetryableError,
-		},
-		InitialInterval: time.Second,
-		MaxElapsedTime:  time.Second * 5,
-		MaxInterval:     time.Second * 2,
-	}
-}
-
 func main() {
 	ctx := context.Background()
 
-	dispatcherClient, err := dispatcher.NewClient(
-		dispatcher.WithBootstrapServers("localhost:9092"),
+	writer, err := kafka.NewWriter(
+		kafka.WithBrokers("localhost:9092"),
+		kafka.WithClientID("devkit-example-consumer"),
 	)
 	if err != nil {
 		log.Fatal(ctx, err.Error())
 	}
 
-	d := dispatcher.New(dispatcherClient)
-	defer d.Shutdown()
+	// The dispatcher is what publishes to the dead letter topic, so a
+	// consumer needs one even when the handler never fails.
+	d := dispatcher.New(writer)
+	defer func() {
+		if err := d.Close(context.Background()); err != nil {
+			log.Error(ctx, err)
+		}
+	}()
 
-	f := consumer.NewFactory(
-		consumer.WithBootstrapServer("localhost:9092"),
+	reader, err := kafka.NewReader("devkit-basic-consumer", []string{"externaldb.public.bet-events"},
+		kafka.WithBrokers("localhost:9092"),
 	)
-
-	handler := newTopicHandler()
+	if err != nil {
+		log.Fatal(ctx, err.Error())
+	}
 
 	logger := log.New(log.WithLevel(log.DebugLevel))
 
-	c, err := consumer.New[Message](d, f, handler, consumer.WithLogger(logger))
+	c, err := consumer.New[Message](reader, d, basicHandler{},
+		consumer.WithLogger[Message](logger),
+		// Only errors listed here are retried; anything else goes straight
+		// to the dead letter topic.
+		consumer.WithRetry[Message](consumer.NewConfigRetry(
+			consumer.WithRetryableErrors(RetryableError),
+			consumer.WithInitialInterval(time.Second),
+			consumer.WithMaxElapsedTime(time.Second*5),
+			consumer.WithMaxInterval(time.Second*2),
+		)),
+	)
 	if err != nil {
 		log.Fatal(ctx, err.Error())
 	}
 
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
+	runCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	shutdown, err := c.Run()
-	if err != nil {
-		return
+	if err := c.Run(runCtx); err != nil {
+		log.Fatal(ctx, err.Error())
 	}
-
-	go func() {
-		err := <-c.ListenShutdown()
-
-		interrupt <- syscall.SIGTERM
-		log.Info(ctx, "internal finish with err "+err.Error())
-	}()
-
-	<-interrupt
-
-	shutdown()
-	log.Info(ctx, "shutdown complete")
 }

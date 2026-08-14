@@ -8,7 +8,6 @@ require (
 	github.com/DataDog/dd-trace-go/v2 v2.1.0
 	github.com/Masterminds/squirrel v1.5.4
 	github.com/cenkalti/backoff/v5 v5.0.3
-	github.com/confluentinc/confluent-kafka-go v1.9.2
 	github.com/go-chi/chi/v5 v5.2.2
 	github.com/go-chi/cors v1.2.1
 	github.com/goccy/go-json v0.10.2

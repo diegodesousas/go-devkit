@@ -45,7 +45,7 @@ Shorter, self-contained snippets are the `Example` functions in each package, re
 
 ## Development
 
-`CGO_ENABLED=1` is required: `confluent-kafka-go` embeds librdkafka through cgo, and `-race` depends on it too.
+The library is pure Go and builds without cgo. `-race` still requires `CGO_ENABLED=1`, but that is a Go toolchain requirement, not a dependency one.
 
 | Command | What it does |
 |---|---|
