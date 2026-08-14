@@ -7,19 +7,19 @@ import (
 
 // Handler is the user code a Consumer drives.
 //
-// ID names the consumer group, Topic the topic to read. ShouldSkip is consulted
-// before Handle and lets a message be acknowledged without processing.
-// ConfigRetry declares which errors are worth retrying and how long to keep
-// trying; it is consulted on every failure, so it must be cheap.
+// It has one method. Everything the previous contract demanded - the group id,
+// the topic, whether to skip, the retry policy - moved to where it belongs:
+// the group and topic are parameters of the reader, which is what actually
+// subscribes, and skipping and retrying are policy, configured with options.
 //
-// Handle receives a context carrying a logger scoped to the message. Returning
-// nil commits the offset.
+// Handle receives a context carrying a logger scoped to the record and the
+// trace continued from the producer. The context is cancelled when the
+// consumer shuts down, so a long handler should honour it.
+//
+// Returning nil marks the record processed and allows its offset to be
+// committed.
 type Handler[T any] interface {
-	ID() string
-	Topic() string
-	ShouldSkip(content T) bool
 	Handle(ctx context.Context, content T) error
-	ConfigRetry() ConfigRetry
 }
 
 // ConfigRetry is a handler retry policy.
