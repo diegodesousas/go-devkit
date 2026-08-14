@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/diegodesousas/go-devkit/pkg/stream"
 	"github.com/diegodesousas/go-devkit/pkg/stream/kafka"
@@ -56,6 +57,37 @@ func TestReader_Poll_ContextCancelled(t *testing.T) {
 
 	assert.Nil(t, records)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// Closing a reader that has already polled must not hang.
+//
+// Every Poll holds rebalances off until the next one, so that a revocation
+// cannot land between a record being polled and its offset being committed.
+// Leaving the group is itself a rebalance, so a Close that did not release
+// first would wait for a poll that is never coming. franz-go's own Close
+// documents that it hangs in exactly this situation.
+func TestReader_CloseAfterPollDoesNotHang(t *testing.T) {
+	listener := newBlackHoleBroker(t)
+	defer func() { _ = listener.Close() }()
+
+	reader, err := kafka.NewReader("billing", []string{"orders"}, kafka.WithBrokers(listener.Addr().String()))
+	assert.Nil(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err = reader.Poll(ctx)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	closed := make(chan error, 1)
+	go func() { closed <- reader.Close() }()
+
+	select {
+	case err := <-closed:
+		assert.Nil(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close hung: the rebalance the last Poll blocked was never released")
+	}
 }
 
 func TestReader_Poll_ClosedClient(t *testing.T) {

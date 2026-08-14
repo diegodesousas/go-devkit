@@ -29,6 +29,15 @@ type reader struct {
 // WithStartOffset; WithProduceTimeout is writer-only and has no effect here.
 //
 // Auto-commit is disabled. Offsets advance only when the caller commits.
+//
+// Rebalances are blocked from the moment a Poll returns records until the next
+// Poll begins, which is the window in which the caller processes and commits
+// them. Without that, the default cooperative balancer can revoke a partition
+// mid-batch and the commit that follows lands on a partition this member no
+// longer owns - overwriting, at worst, a commit the new owner already made.
+// The cost of blocking is the other side of the trade: a batch that takes
+// longer than the broker's rebalance timeout gets this member kicked out of the
+// group. Poll caps a batch at maxPollRecords to bound how long that can be.
 func NewReader(groupID string, topics []string, opts ...Option) (stream.Reader, error) {
 	if groupID == "" {
 		return nil, ErrNoGroupID
@@ -52,6 +61,7 @@ func NewReader(groupID string, topics []string, opts ...Option) (stream.Reader, 
 		kgo.ConsumerGroup(groupID),
 		kgo.ConsumeTopics(topics...),
 		kgo.DisableAutoCommit(),
+		kgo.BlockRebalanceOnPoll(),
 		kgo.SessionTimeout(s.sessionTimeout),
 		kgo.ConsumeResetOffset(s.startAt()),
 	)
@@ -66,7 +76,16 @@ func NewReader(groupID string, topics []string, opts ...Option) (stream.Reader, 
 
 // Poll waits for records. A cancelled context yields that context's error
 // rather than a partial batch.
+//
+// It opens by releasing the rebalance the previous batch was holding off, so a
+// revocation lands between two batches and never between a record being polled
+// and its offset being committed. This has to be the first thing Poll does:
+// anything before it runs while the group is still blocked, and franz-go gives
+// rebalances priority once released, so the release must happen before the poll
+// that would otherwise queue behind it.
 func (r *reader) Poll(ctx context.Context) ([]stream.Record, error) {
+	r.client.AllowRebalance()
+
 	fetches := r.client.PollRecords(ctx, maxPollRecords)
 
 	if err := ctx.Err(); err != nil {
@@ -114,9 +133,13 @@ func (r *reader) Commit(ctx context.Context, records ...stream.Record) error {
 	return nil
 }
 
-// Close releases the connections held by the consumer.
+// Close leaves the group and releases the connections held by the consumer.
+//
+// It releases the rebalance the last batch was holding off first. Leaving a
+// group is itself a rebalance, so a close that did not release would wait for
+// a poll that is never coming and hang forever.
 func (r *reader) Close() error {
-	r.client.Close()
+	r.client.CloseAllowingRebalance()
 
 	return nil
 }
