@@ -11,7 +11,7 @@ type tx struct {
 	tx *sqlx.Tx
 }
 
-func (t *tx) Get(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
+func (t *tx) Get(ctx context.Context, dest any, query string, args ...any) error {
 	if err := t.tx.GetContext(ctx, dest, query, args...); err != nil {
 		return pgErrWrapper(err)
 	}
@@ -19,7 +19,7 @@ func (t *tx) Get(ctx context.Context, dest interface{}, query string, args ...in
 	return nil
 }
 
-func (t *tx) Select(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
+func (t *tx) Select(ctx context.Context, dest any, query string, args ...any) error {
 	if err := t.tx.SelectContext(ctx, dest, query, args...); err != nil {
 		return pgErrWrapper(err)
 	}
@@ -27,7 +27,7 @@ func (t *tx) Select(ctx context.Context, dest interface{}, query string, args ..
 	return nil
 }
 
-func (t *tx) Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (t *tx) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	res, err := t.tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return nil, pgErrWrapper(err)

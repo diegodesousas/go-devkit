@@ -302,17 +302,17 @@ func Test_tx_Exec(t *testing.T) {
 		{
 			name:  "Test Exec()",
 			query: `CREATE TABLE affiliates ( id SERIAL PRIMARY KEY, name VARCHAR );`,
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
-			commitErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			commitErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.Error(t, err)
 			},
 		},
 		{
 			name:  "Test failed Exec()",
 			query: `INSERT INTO deals (affiliate_id, value) VALUES (1, 100)`,
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.Error(t, err)
 			},
 		},
@@ -353,10 +353,10 @@ func Test_tx_Get(t *testing.T) {
 			name:  "Get affiliate",
 			dest:  &mockAffiliate{},
 			query: `SELECT id, name FROM affiliates`,
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
-			wantCommitErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantCommitErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
 			expect: &mockAffiliate{Id: 1, Name: "Jon Doe"},
@@ -366,10 +366,10 @@ func Test_tx_Get(t *testing.T) {
 			dest:   &mockAffiliate{},
 			query:  `SELECT id, name FROM affiliates WHERE name='John Rambo'`,
 			expect: &mockAffiliate{},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.ErrorIs(t, err, stdSql.ErrNoRows)
 			},
-			wantCommitErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantCommitErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
 		},
@@ -378,10 +378,10 @@ func Test_tx_Get(t *testing.T) {
 			query:  `SELECT id, Name FROM affiliates`,
 			dest:   mockAffiliate{},
 			expect: mockAffiliate{},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.ErrorContains(t, err, "must pass a pointer, not a value, to StructScan destination")
 			},
-			wantCommitErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantCommitErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
 		},
@@ -421,7 +421,7 @@ func Test_TransactionContext_Get(t *testing.T) {
 			name:  "Get affiliate",
 			dest:  &mockAffiliate{},
 			query: `SELECT id, name FROM affiliates`,
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
 			expect: &mockAffiliate{Id: 1, Name: "Jon Doe"},
@@ -431,7 +431,7 @@ func Test_TransactionContext_Get(t *testing.T) {
 			dest:   &mockAffiliate{},
 			query:  `SELECT id, name FROM affiliates WHERE name='John Rambo'`,
 			expect: &mockAffiliate{},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.ErrorIs(t, err, stdSql.ErrNoRows)
 			},
 		},
@@ -440,7 +440,7 @@ func Test_TransactionContext_Get(t *testing.T) {
 			query:  `SELECT id, Name FROM affiliates`,
 			dest:   mockAffiliate{},
 			expect: mockAffiliate{},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.ErrorContains(t, err, "must pass a pointer, not a value, to StructScan destination")
 			},
 		},
@@ -486,10 +486,10 @@ func Test_tx_Select(t *testing.T) {
 				{2, "Connor McGregor"},
 				{3, "John Jones"},
 			},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
-			wantCommitErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantCommitErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
 		},
@@ -499,10 +499,10 @@ func Test_tx_Select(t *testing.T) {
 			query:  "SELECT id name FROM affiliate WHERE name = $1",
 			args:   []any{"John Doe"},
 			expect: &[]mockAffiliate{},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.Error(t, err)
 			},
-			wantCommitErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantCommitErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.Error(t, err)
 			},
 		},
@@ -549,7 +549,7 @@ func Test_TransactionContext_Select(t *testing.T) {
 				{2, "Connor McGregor"},
 				{3, "John Jones"},
 			},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.NoError(t, err)
 			},
 		},
@@ -559,7 +559,7 @@ func Test_TransactionContext_Select(t *testing.T) {
 			query:  "SELECT id name FROM affiliate WHERE name = $1",
 			args:   []any{"John Doe"},
 			expect: &[]mockAffiliate{},
-			wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
 				return assert.Error(t, err)
 			},
 		},

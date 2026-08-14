@@ -9,7 +9,7 @@ type LoggerMock struct {
 }
 
 func (l *LoggerMock) Info(msg string, fields ...Field) {
-	var params []interface{}
+	var params []any
 	params = append(params, msg)
 
 	for _, field := range fields {
@@ -20,7 +20,7 @@ func (l *LoggerMock) Info(msg string, fields ...Field) {
 }
 
 func (l *LoggerMock) Error(msg string, fields ...Field) {
-	var params []interface{}
+	var params []any
 	params = append(params, msg)
 
 	for _, field := range fields {
@@ -31,7 +31,7 @@ func (l *LoggerMock) Error(msg string, fields ...Field) {
 }
 
 func (l *LoggerMock) Debug(msg string, fields ...Field) {
-	var params []interface{}
+	var params []any
 	params = append(params, msg)
 
 	for _, field := range fields {
@@ -42,7 +42,7 @@ func (l *LoggerMock) Debug(msg string, fields ...Field) {
 }
 
 func (l *LoggerMock) Warn(msg string, fields ...Field) {
-	var params []interface{}
+	var params []any
 	params = append(params, msg)
 
 	for _, field := range fields {
@@ -53,7 +53,7 @@ func (l *LoggerMock) Warn(msg string, fields ...Field) {
 }
 
 func (l *LoggerMock) Fatal(msg string, fields ...Field) {
-	var params []interface{}
+	var params []any
 	params = append(params, msg)
 
 	for _, field := range fields {
