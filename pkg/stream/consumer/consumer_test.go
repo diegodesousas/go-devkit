@@ -256,6 +256,56 @@ func TestRun_HaltedPartitionStaysHaltedAcrossPolls(t *testing.T) {
 	})
 }
 
+// processPartition stops at the first unresolved record instead of skipping
+// over it: a later record on the same partition, in the same batch, must
+// never reach the handler or be committed once an earlier one has halted the
+// partition. Giving the failing partition a successor record, rather than
+// leaving it as the batch's only record, is what makes this a test of the
+// "stop", not just of the "halt": every other halt test in this file hands
+// the failing partition exactly one record, so none of them can tell a
+// consumer that breaks out of the loop apart from one that merely skips the
+// unresolved record and keeps going - both would leave that single record
+// uncommitted.
+func TestRun_HaltStopsAtFirstUnresolvedRecordInPartition(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		bad := jsonRecord("orders", 0, 1, "bad")
+		good := jsonRecord("orders", 0, 2, "good")
+
+		reader := &readerMock{}
+		reader.On("Poll", mock.Anything).Return([]stream.Record{bad, good}, nil).Once()
+		reader.On("Poll", mock.Anything).Return(nil, stream.ErrReaderClosed)
+		reader.On("Close").Return(nil).Once()
+
+		handler := &handlerMock{}
+		handler.On("Handle", mock.Anything, "bad").Return(errors.New("permanent")).Once()
+		// Registered so that, if processPartition wrongly keeps going after
+		// the halt, the call succeeds quietly instead of panicking on an
+		// unregistered call - the point is to catch the bug with a plain
+		// assertion, not a mock crash.
+		handler.On("Handle", mock.Anything, "good").Return(nil)
+
+		dlt := &dispatcherMock{}
+		// bad's three retries, bounded by deadLetterMaxTries. good must never
+		// reach the dead letter path at all, since it must never reach the
+		// handler.
+		dlt.On("Dispatch", mock.Anything, "orders-dlt", "key", mock.Anything).
+			Return(errors.New("broker down")).
+			Times(3)
+
+		c, err := consumer.New[string](reader, dlt, handler)
+		assert.Nil(t, err)
+
+		assert.Nil(t, c.Run(context.Background()))
+
+		// A correct implementation never calls Handle for good and never
+		// commits anything in this batch - the partition halted on its first
+		// record. A consumer that skips the unresolved record instead of
+		// stopping at it would call Handle a second time and commit good@2.
+		handler.AssertNumberOfCalls(t, "Handle", 1)
+		reader.AssertNotCalled(t, "Commit", mock.Anything, mock.Anything)
+	})
+}
+
 // A failure on one partition must not stop another.
 func TestRun_OnePartitionFailureDoesNotBlockAnother(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -481,12 +531,19 @@ func TestRun_CancelInterruptsRetry(t *testing.T) {
 
 // The span context injected by the dispatcher is extracted on the way back, so
 // producer and consumer land in one trace instead of two disconnected ones.
+//
+// Asserting only that the handler's context carries *a* span is not enough: a
+// consumer that dropped tracer.ChildOf and started a fresh root span would
+// still put a span in the context and still pass. What actually matters is
+// that the handler's span shares the producer's trace id, which is what
+// "landed in the same trace" means.
 func TestRun_ExtractsTraceFromHeaders(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		record := jsonRecord("orders", 0, 1, "payload")
 
 		carrier := stream.HeaderCarrier{}
 		span := tracer.StartSpan("producer.test")
+		expectedTraceID := span.Context().TraceID()
 		assert.Nil(t, tracer.Inject(span.Context(), carrier))
 		span.Finish()
 
@@ -498,14 +555,21 @@ func TestRun_ExtractsTraceFromHeaders(t *testing.T) {
 		reader.On("Commit", mock.Anything, mock.Anything).Return(nil).Once()
 		reader.On("Close").Return(nil).Once()
 
-		var handlerSpanFound bool
+		var (
+			handlerSpanFound bool
+			handlerTraceID   string
+		)
 
 		handler := &handlerMock{}
 		handler.
 			On("Handle", mock.Anything, "payload").
 			Run(func(args mock.Arguments) {
 				ctx := args.Get(0).(context.Context)
-				_, handlerSpanFound = tracer.SpanFromContext(ctx)
+				var handlerSpan *tracer.Span
+				handlerSpan, handlerSpanFound = tracer.SpanFromContext(ctx)
+				if handlerSpanFound {
+					handlerTraceID = handlerSpan.Context().TraceID()
+				}
 			}).
 			Return(nil).
 			Once()
@@ -516,6 +580,7 @@ func TestRun_ExtractsTraceFromHeaders(t *testing.T) {
 		assert.Nil(t, c.Run(context.Background()))
 
 		assert.True(t, handlerSpanFound, "handler context should carry the continued span")
+		assert.Equal(t, expectedTraceID, handlerTraceID, "handler span should share the producer's trace id, not start a fresh one")
 	})
 }
 
