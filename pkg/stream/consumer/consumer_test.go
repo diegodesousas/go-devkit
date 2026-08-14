@@ -2,6 +2,9 @@ package consumer_test
 
 import (
 	"context"
+	"fmt"
+	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -411,6 +414,115 @@ func TestRun_HaltStopsAtFirstUnresolvedRecordInPartition(t *testing.T) {
 		// stopping at it would call Handle a second time and commit good@2.
 		handler.AssertNumberOfCalls(t, "Handle", 1)
 		reader.AssertNotCalled(t, "Commit", mock.Anything, mock.Anything)
+	})
+}
+
+// partitionArrivals keeps the records the handler saw for one partition, in the
+// order it saw them.
+func partitionArrivals(arrivals []string, partition int32) []string {
+	prefix := fmt.Sprintf("%d/", partition)
+
+	var got []string
+	for _, arrival := range arrivals {
+		if strings.HasPrefix(arrival, prefix) {
+			got = append(got, arrival)
+		}
+	}
+
+	return got
+}
+
+// Partitions of a batch are processed concurrently, and in order within each -
+// the reason the fan-out exists, and the only ordering Kafka itself guarantees.
+//
+// Nothing else in this file constrains it. Every other case here, including the
+// one about a failure on one partition not blocking another, passes unchanged
+// against a consumer that walks the partitions one after the other, so the
+// concurrency has to be proved rather than inferred.
+//
+// The barrier is what proves it: the first record of each partition blocks
+// until the other partition also has a record inside the handler. Two
+// goroutines both reach it and both go on, so maxInFlight becomes 2. A serial
+// consumer only ever has one there - and rather than hang, the fake clock jumps
+// to the timeout the moment every goroutine is blocked, so the run finishes and
+// fails on the assertion instead of on the suite's deadline.
+func TestRun_ProcessesPartitionsConcurrentlyAndInOrder(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			partitions          = 2
+			recordsPerPartition = 3
+		)
+
+		var (
+			expectedPartition0 = []string{"0/1", "0/2", "0/3"}
+			expectedPartition1 = []string{"1/1", "1/2", "1/3"}
+			expectedInFlight   = partitions
+		)
+
+		var records []stream.Record
+		for partition := int32(0); partition < partitions; partition++ {
+			for offset := int64(1); offset <= recordsPerPartition; offset++ {
+				content := fmt.Sprintf("%d/%d", partition, offset)
+				records = append(records, jsonRecord("orders", partition, offset, content))
+			}
+		}
+
+		reader := &readerMock{}
+		reader.On("Poll", mock.Anything).Return(records, nil).Once()
+		reader.On("Poll", mock.Anything).Return(nil, stream.ErrReaderClosed)
+		reader.On("Commit", mock.Anything, mock.MatchedBy(func(committed []stream.Record) bool {
+			return len(committed) == len(records)
+		})).Return(nil).Once()
+		reader.On("Close").Return(nil).Once()
+
+		var (
+			mutex       sync.Mutex
+			arrivals    []string
+			inFlight    int
+			maxInFlight int
+			released    bool
+		)
+
+		bothInFlight := make(chan struct{})
+
+		handler := &handlerMock{}
+		handler.
+			On("Handle", mock.Anything, mock.Anything).
+			Run(func(args mock.Arguments) {
+				mutex.Lock()
+				arrivals = append(arrivals, args.Get(1).(string))
+				inFlight++
+				if inFlight > maxInFlight {
+					maxInFlight = inFlight
+				}
+				release := inFlight == partitions && !released
+				released = released || release
+				mutex.Unlock()
+
+				if release {
+					close(bothInFlight)
+				} else {
+					select {
+					case <-bothInFlight:
+					case <-time.After(time.Minute):
+					}
+				}
+
+				mutex.Lock()
+				inFlight--
+				mutex.Unlock()
+			}).
+			Return(nil)
+
+		c, err := consumer.New[string](reader, &dispatcherMock{}, handler)
+		assert.Nil(t, err)
+
+		assert.Nil(t, c.Run(context.Background()))
+
+		assert.Equal(t, expectedInFlight, maxInFlight,
+			"both partitions must be inside the handler at once; a serial consumer never gets past one")
+		assert.Equal(t, expectedPartition0, partitionArrivals(arrivals, 0))
+		assert.Equal(t, expectedPartition1, partitionArrivals(arrivals, 1))
 	})
 }
 
