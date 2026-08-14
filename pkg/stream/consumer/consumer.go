@@ -4,10 +4,9 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
-	"github.com/cenkalti/backoff/v4"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
+	"github.com/cenkalti/backoff/v5"
 	"github.com/diegodesousas/go-devkit/pkg/gen"
 	"github.com/diegodesousas/go-devkit/pkg/log"
 	"github.com/diegodesousas/go-devkit/pkg/stream"
@@ -15,172 +14,387 @@ import (
 	"github.com/pkg/errors"
 )
 
-const (
-	pollInterval     = time.Millisecond * 100
-	deadLetterSuffix = "dlt"
-	uniqueNamePrefix = "devkit"
-	loggerTraceKey   = "trace-id"
-)
+const loggerTraceKey = "trace-id"
 
-// Shutdown stops the consumer: it waits for the message being processed, then
-// closes the Kafka client.
-type Shutdown func()
-
-// Consumer is a running Kafka consumer loop.
+// Consumer runs a Kafka consumer loop.
 type Consumer interface {
-	Run() (Shutdown, error)
-	ListenShutdown() <-chan error
+	Run(ctx context.Context) error
 }
 
 type defaultConsumer[T any] struct {
-	client           Client
-	dispatcher       dispatcher.Dispatcher
-	handler          Handler[T]
-	shutdownStarted  chan struct{}
-	shutdownFinished chan struct{}
-	shutdownListener chan error
-	logger           log.Logger
-	stringGenerator  gen.StringGenerator
-	groupID          string
-	topic            string
+	reader          stream.Reader
+	dlt             dispatcher.Dispatcher
+	handler         Handler[T]
+	logger          log.Logger
+	stringGenerator gen.StringGenerator
+	skip            func(T) bool
+	retry           ConfigRetry
+	deadLetterTopic string
+
+	// halted holds the partitions that stopped committing because a record
+	// could not be resolved. It is read while the batch is grouped and written
+	// after the fan-out has joined - both serial sections of a Run that is
+	// itself single-threaded - so it needs no lock.
+	halted map[partitionKey]struct{}
 }
 
-// New builds a Consumer for messages decoded into T.
+// New builds a Consumer decoding records into T.
 //
-// It creates a Kafka client through factory using the handler ID as the group,
-// so it fails if the broker is unreachable. dispatcher is used to publish to the
-// dead letter topic, and is therefore required even for a consumer that never
+// reader supplies the records and owns the group membership; dlt publishes to
+// the dead letter topic, and is therefore required even when the handler never
 // fails.
 //
-// New does not start anything - call Run.
+// All three are required: New returns ErrNoReader, ErrNoDeadLetterDispatcher
+// or ErrNoHandler rather than let a nil surface later, when it would land in
+// the middle of resolving a record and take the partition down with it.
+//
+// New starts nothing. Call Run, once: a Consumer drives a single loop and is
+// not meant to be shared between goroutines.
 func New[T any](
-	dispatcher dispatcher.Dispatcher,
-	factory Factory,
+	reader stream.Reader,
+	dlt dispatcher.Dispatcher,
 	handler Handler[T],
-	options ...Option,
+	opts ...Option[T],
 ) (Consumer, error) {
-	groupID := handler.ID()
-	topic := handler.Topic()
-
-	uniqueName := fmt.Sprintf("%s-%s", uniqueNamePrefix, groupID)
-
-	client, err := factory.New(uniqueName)
-	if err != nil {
-		return nil, err
+	if reader == nil {
+		return nil, ErrNoReader
 	}
 
-	s := settings{
+	if dlt == nil {
+		return nil, ErrNoDeadLetterDispatcher
+	}
+
+	if handler == nil {
+		return nil, ErrNoHandler
+	}
+
+	s := settings[T]{
 		logger:          log.New(),
 		stringGenerator: gen.UUIDGenerator(),
 	}
 
-	for _, option := range options {
-		s = option(s)
+	for _, opt := range opts {
+		s = opt(s)
 	}
 
 	return &defaultConsumer[T]{
-		groupID:          groupID,
-		topic:            topic,
-		handler:          handler,
-		client:           client,
-		dispatcher:       dispatcher,
-		shutdownStarted:  make(chan struct{}, 1),
-		shutdownFinished: make(chan struct{}, 1),
-		shutdownListener: make(chan error, 1),
-		logger: s.logger.WithFields(
-			log.NewField("consumer-group", groupID),
-			log.NewField("consumer-topic", topic),
-		),
+		reader:          reader,
+		dlt:             dlt,
+		handler:         handler,
+		logger:          s.logger,
 		stringGenerator: s.stringGenerator,
+		skip:            s.skip,
+		retry:           s.retry,
+		deadLetterTopic: s.deadLetterTopic,
+		halted:          make(map[partitionKey]struct{}),
 	}, nil
 }
 
-func (c defaultConsumer[T]) Run() (Shutdown, error) {
-	if err := c.client.Subscribe(c.topic, nil); err != nil {
-		return nil, err
-	}
+// Run polls and processes until ctx is cancelled or the loop can make no more
+// progress.
+//
+// It blocks. Cancelling ctx ends the run without an error: the record each
+// partition has in flight is finished, the records the batch had not started
+// are left for the next process, what completed is committed, and Run returns
+// nil. A reader failure returns that error.
+//
+// Run also returns, with ErrDeadLetterUnavailable, once every partition
+// delivering records has halted. A halt stops one partition so the others can
+// carry on; with no others left there is nothing to carry on, and a consumer
+// that kept polling would drop every record it fetched and commit nothing -
+// draining the topic at whatever speed the broker serves it, advancing nothing.
+// Halts are only cleared by a restart, which is what returning asks for.
+func (c *defaultConsumer[T]) Run(ctx context.Context) error {
+	defer func() { _ = c.reader.Close() }()
 
-	go func() {
-		waitGroup := &sync.WaitGroup{}
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
 
-		for {
-			select {
-			case <-c.shutdownStarted:
-				waitGroup.Wait()
-				c.shutdownFinished <- struct{}{}
-				return
-			default:
-				waitGroup.Add(1)
-				if err := c.readMessage(waitGroup); err != nil {
-					go c.startingShutdownInternally(err)
+		records, err := c.reader.Poll(ctx)
+		if err != nil {
+			if isShutdown(ctx, err) {
+				return nil
+			}
 
-					return
-				}
+			return err
+		}
+
+		if len(records) == 0 {
+			continue
+		}
+
+		committable, allHalted := c.processBatch(ctx, records)
+
+		if len(committable) > 0 {
+			// Commit with a context that outlives cancellation: work that
+			// finished must not be reprocessed just because shutdown began.
+			commitCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultCommitTimeout)
+			err := c.reader.Commit(commitCtx, committable...)
+			cancel()
+
+			if err != nil {
+				return err
 			}
 		}
-	}()
 
-	return func() {
-		c.shutdown()
-	}, nil
+		// Checked after the commit, so the prefix the halted partition did
+		// resolve is still acknowledged. A cancelled context is not reported
+		// as a halt: the next iteration returns nil for it.
+		if allHalted && ctx.Err() == nil {
+			return errors.WithStack(ErrDeadLetterUnavailable)
+		}
+	}
 }
 
-func (c defaultConsumer[T]) startingShutdownInternally(err error) {
-	c.shutdownListener <- err
-
-	<-c.shutdownStarted
-
-	c.shutdownFinished <- struct{}{}
+// isShutdown reports whether a poll failure is the shutdown making itself felt
+// rather than a broker problem.
+//
+// The context is consulted directly, and not only matched against the error,
+// because a reader reports an expired context however it sees fit -
+// pkg/stream/kafka returns ctx.Err() raw, so a deadline arrives as
+// context.DeadlineExceeded. Run promises nil for every cancellation, whether it
+// lands while Poll blocks or between iterations.
+func isShutdown(ctx context.Context, err error) bool {
+	return ctx.Err() != nil ||
+		errors.Is(err, context.Canceled) ||
+		errors.Is(err, stream.ErrReaderClosed)
 }
 
-func (c defaultConsumer[T]) ListenShutdown() <-chan error {
-	return c.shutdownListener
+type partitionKey struct {
+	topic     string
+	partition int32
 }
 
-func (c defaultConsumer[T]) processMessage(ctx context.Context, message *kafka.Message) error {
-	typeMessage, err := stream.NewMessageType(message)
+// partitionBatch is one partition's share of a poll.
+type partitionBatch struct {
+	key     partitionKey
+	records []stream.Record
+}
+
+// partitionResult is what processPartition made of a partitionBatch: the
+// records whose offsets may be committed, and whether the partition hit a
+// record it could not resolve and must stop committing for good.
+type partitionResult struct {
+	committable []stream.Record
+	halted      bool
+}
+
+// processBatch fans the batch out by partition and returns the records whose
+// offsets may be committed, plus whether every partition in the batch is now
+// halted - the point at which the loop has nothing left to make progress on.
+//
+// Records within a partition are processed in order; partitions run
+// concurrently. That preserves the only ordering Kafka actually guarantees
+// while letting throughput scale with the partition count.
+//
+// Records belonging to a halted partition are dropped unprocessed: that
+// partition's offset must not move again.
+func (c *defaultConsumer[T]) processBatch(ctx context.Context, records []stream.Record) ([]stream.Record, bool) {
+	delivered := make(map[partitionKey]struct{})
+	byPartition := make(map[partitionKey][]stream.Record)
+	for _, record := range records {
+		key := partitionKey{topic: record.Topic, partition: record.Partition}
+		delivered[key] = struct{}{}
+
+		if _, halted := c.halted[key]; halted {
+			continue
+		}
+
+		byPartition[key] = append(byPartition[key], record)
+	}
+
+	// Each goroutine writes to its own slot, so the results need no lock.
+	batches := make([]partitionBatch, 0, len(byPartition))
+	for key, partitionRecords := range byPartition {
+		batches = append(batches, partitionBatch{key: key, records: partitionRecords})
+	}
+
+	results := make([]partitionResult, len(batches))
+
+	var waitGroup sync.WaitGroup
+	for i, batch := range batches {
+		waitGroup.Go(func() {
+			results[i] = c.processPartition(ctx, batch.records)
+		})
+	}
+
+	waitGroup.Wait()
+
+	var committable []stream.Record
+	for i, result := range results {
+		committable = append(committable, result.committable...)
+
+		if result.halted {
+			c.halt(ctx, batches[i].key)
+		}
+	}
+
+	return committable, c.allHalted(delivered)
+}
+
+// allHalted reports whether every partition that delivered records in this
+// batch is halted, counting the halts this batch itself just recorded.
+func (c *defaultConsumer[T]) allHalted(delivered map[partitionKey]struct{}) bool {
+	for key := range delivered {
+		if _, halted := c.halted[key]; !halted {
+			return false
+		}
+	}
+
+	return true
+}
+
+// halt stops committing a partition for the rest of this process's life.
+//
+// Its records keep being delivered - the reader is still subscribed and its
+// fetch position moves on regardless - and are dropped unprocessed from every
+// later batch, so the committed offset stays put and the whole backlog from the
+// unresolved record onwards is redelivered to the next process.
+//
+// Halting is one-way and recorded once, which is what keeps the critical
+// warning from repeating on every poll.
+func (c *defaultConsumer[T]) halt(ctx context.Context, key partitionKey) {
+	c.halted[key] = struct{}{}
+
+	logger := c.logger.WithFields(
+		log.NewField("consumer-topic", key.topic),
+		log.NewField("message-partition", key.partition),
+	)
+
+	log.Warn(
+		log.WithLogger(ctx, logger),
+		"partition halted: a record could not be resolved and its offset will not advance",
+		log.WarningTypeCritical,
+	)
+}
+
+// processPartition handles one partition's records in order and reports the
+// contiguous prefix that may be committed.
+//
+// It stops at the first record it cannot resolve - one whose dead letter
+// publication failed - because committing past it would lose it, and reports
+// the partition halted so that later batches skip it too.
+//
+// A record left unfinished by a cancelled context is not a halt: it is simply
+// not committed, and the next process picks it up.
+func (c *defaultConsumer[T]) processPartition(ctx context.Context, records []stream.Record) partitionResult {
+	result := partitionResult{committable: make([]stream.Record, 0, len(records))}
+
+	for _, record := range records {
+		if ctx.Err() != nil {
+			return result
+		}
+
+		if err := c.handleRecord(ctx, record); err != nil {
+			result.halted = ctx.Err() == nil
+
+			return result
+		}
+
+		result.committable = append(result.committable, record)
+	}
+
+	return result
+}
+
+// handleRecord resolves one record under its own context, and closes the span
+// that context opened whatever the outcome.
+//
+// An unresolved record is worth waking someone for - it is about to stop a
+// partition - unless the shutdown is what cut it short, in which case it is
+// only uncommitted work that the next process will redo.
+func (c *defaultConsumer[T]) handleRecord(ctx context.Context, record stream.Record) error {
+	recordCtx, finishSpan := c.contextFor(ctx, record)
+	defer finishSpan()
+
+	err := c.processRecord(recordCtx, record)
+	if err == nil {
+		return nil
+	}
+
+	if ctx.Err() != nil {
+		log.Error(recordCtx, err)
+
+		return err
+	}
+
+	log.Error(recordCtx, err, log.WarningTypeCritical)
+
+	return err
+}
+
+// contextFor derives the per-record context: the trace continued from the
+// producer, plus a logger scoped to this record.
+//
+// The returned function ends the span the record opened, and does nothing when
+// the producer sent no trace context.
+func (c *defaultConsumer[T]) contextFor(ctx context.Context, record stream.Record) (context.Context, func()) {
+	finishSpan := func() {}
+
+	// ChildOf is deprecated in favour of Span.StartChild, which needs a local
+	// parent span. There is none here - the parent is the producer - so ChildOf
+	// remains the documented way to continue an extracted trace.
+	if spanCtx, err := tracer.Extract(stream.NewHeaderCarrier(record.Headers)); err == nil {
+		span := tracer.StartSpan("stream.consumer", tracer.ChildOf(spanCtx)) //nolint:staticcheck
+		finishSpan = func() { span.Finish() }
+		ctx = tracer.ContextWithSpan(ctx, span)
+	}
+
+	logger := c.logger.WithFields(
+		log.NewField("consumer-topic", record.Topic),
+		log.NewField("message-partition", record.Partition),
+		log.NewField("message-offset", record.Offset),
+		log.NewField(loggerTraceKey, c.stringGenerator()),
+	)
+
+	return log.WithLogger(ctx, logger), finishSpan
+}
+
+// processRecord resolves one record. A nil return means the offset may be
+// committed - including when the record was routed to the dead letter topic,
+// which is a resolution, not a failure.
+func (c *defaultConsumer[T]) processRecord(ctx context.Context, record stream.Record) error {
+	message, err := stream.NewMessageType(record)
 	if err != nil {
-		return c.dispatchToDeadLetterTopicAsText(ctx, message)
+		return c.toDeadLetterAsText(ctx, record)
 	}
 
 	var content T
-
-	if err := typeMessage.Deserialize(message.Value, &content); err != nil {
-		return c.dispatchToDeadLetterTopicAsText(ctx, message)
+	if err := message.Deserialize(record.Value, &content); err != nil {
+		return c.toDeadLetterAsText(ctx, record)
 	}
 
-	if c.handler.ShouldSkip(content) {
-		log.Debug(ctx, "message skipped")
+	if c.skip != nil && c.skip(content) {
+		log.Debug(ctx, "record skipped")
+
 		return nil
 	}
 
-	log.Debug(ctx, "running handler")
 	err = c.handler.Handle(ctx, content)
 	if err == nil {
-		log.Debug(ctx, "handler execution successful")
 		return nil
 	}
-
-	configRetry := c.handler.ConfigRetry()
 
 	log.Error(ctx, err)
 
-	if !c.shouldRetry(err, configRetry.RetryableErrors) {
-		return c.dispatchToDeadLetterTopic(ctx, content, message, typeMessage)
+	if !c.isRetryable(err) {
+		return c.toDeadLetter(ctx, record, message, content)
 	}
 
-	if err = c.runRetry(ctx, content); err != nil {
-		return c.dispatchToDeadLetterTopic(ctx, content, message, typeMessage)
+	if err := c.runRetry(ctx, content); err != nil {
+		return c.toDeadLetter(ctx, record, message, content)
 	}
 
-	log.Info(ctx, "handler execution successful with retry")
+	log.Info(ctx, "handler succeeded after retry")
 
 	return nil
 }
 
-func (c defaultConsumer[T]) shouldRetry(err error, list []error) bool {
-	for _, currentErr := range list {
-		if errors.Is(err, currentErr) {
+func (c *defaultConsumer[T]) isRetryable(err error) bool {
+	for _, retryable := range c.retry.RetryableErrors {
+		if errors.Is(err, retryable) {
 			return true
 		}
 	}
@@ -188,120 +402,94 @@ func (c defaultConsumer[T]) shouldRetry(err error, list []error) bool {
 	return false
 }
 
-func (c defaultConsumer[T]) runRetry(ctx context.Context, content T) error {
+// runRetry retries the handler with exponential backoff, honouring
+// cancellation. The previous implementation slept and retried without a
+// context, so a shutdown had to wait out the whole policy and the broker
+// evicted the consumer for not polling.
+func (c *defaultConsumer[T]) runRetry(ctx context.Context, content T) error {
 	attempts := 0
-	operation := func() error {
-		attempts = attempts + 1
-		log.Debug(ctx, "retrying execution", log.NewField("attempt", attempts))
-		return c.handler.Handle(ctx, content)
+
+	operation := func() (struct{}, error) {
+		attempts++
+		log.Debug(ctx, "retrying handler", log.NewField("attempt", attempts))
+
+		return struct{}{}, c.handler.Handle(ctx, content)
 	}
 
-	configRetry := c.handler.ConfigRetry()
+	exponential := backoff.NewExponentialBackOff()
+	if c.retry.InitialInterval > 0 {
+		exponential.InitialInterval = c.retry.InitialInterval
+	}
+	if c.retry.MaxInterval > 0 {
+		exponential.MaxInterval = c.retry.MaxInterval
+	}
 
-	backOff := backoff.NewExponentialBackOff()
+	retryOpts := []backoff.RetryOption{backoff.WithBackOff(exponential)}
+	if c.retry.MaxElapsedTime > 0 {
+		retryOpts = append(retryOpts, backoff.WithMaxElapsedTime(c.retry.MaxElapsedTime))
+	}
 
-	time.Sleep(configRetry.InitialInterval)
-
-	backOff.InitialInterval = configRetry.InitialInterval
-	backOff.MaxElapsedTime = configRetry.MaxElapsedTime
-	backOff.MaxInterval = configRetry.MaxInterval
-
-	if err := backoff.Retry(operation, backOff); err != nil {
+	if _, err := backoff.Retry(ctx, operation, retryOpts...); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (c defaultConsumer[T]) dispatchToDeadLetterTopic(
+func (c *defaultConsumer[T]) toDeadLetter(
 	ctx context.Context,
+	record stream.Record,
+	message stream.Message,
 	content T,
-	message *kafka.Message,
-	typeMessage stream.Message,
 ) error {
-	topicDLT := c.deadLetterTopic()
+	return c.publishDeadLetter(ctx, record, message.NewWithData(content))
+}
 
-	if err := c.dispatcher.Dispatch(ctx, topicDLT, string(message.Key), typeMessage.NewWithData(content)); err != nil {
+func (c *defaultConsumer[T]) toDeadLetterAsText(ctx context.Context, record stream.Record) error {
+	return c.publishDeadLetter(ctx, record, stream.NewTextMessage(string(record.Value)))
+}
+
+// publishDeadLetter retries the dead letter publication before giving up.
+//
+// Giving up returns ErrDeadLetterUnavailable, which halts this partition
+// without committing: nothing more of it is processed or committed by this
+// process, and the next one picks the record back up. Other partitions are
+// unaffected.
+//
+// A cancelled context returns before publishing anything. Handlers are told to
+// honour cancellation, so on shutdown the record in flight fails with
+// context.Canceled - and a record whose only fault was the shutdown belongs
+// back on its own topic, not in the dead letter one.
+func (c *defaultConsumer[T]) publishDeadLetter(ctx context.Context, record stream.Record, message stream.Message) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 
-	log.Warn(ctx, "message sent to dead letter topic", log.WarningTypeCritical)
+	topic := c.deadLetterTopicFor(record)
 
-	return nil
-}
-
-func (c defaultConsumer[T]) deadLetterTopic() string {
-	return fmt.Sprintf("%s-%s", c.topic, deadLetterSuffix)
-}
-
-func (c defaultConsumer[T]) dispatchToDeadLetterTopicAsText(
-	ctx context.Context,
-	message *kafka.Message,
-) error {
-	topicDLT := c.deadLetterTopic()
-
-	txtMessage := stream.NewTextMessage(string(message.Value))
-
-	if err := c.dispatcher.Dispatch(ctx, topicDLT, string(message.Key), txtMessage); err != nil {
-		return err
+	operation := func() (struct{}, error) {
+		return struct{}{}, c.dlt.Dispatch(ctx, topic, string(record.Key), message)
 	}
 
-	log.Warn(ctx, "message sent to dead letter topic", log.WarningTypeCritical)
-
-	return nil
-}
-
-func (c defaultConsumer[T]) readMessage(group *sync.WaitGroup) error {
-	defer group.Done()
-
-	msg, err := c.client.ReadMessage(pollInterval)
+	_, err := backoff.Retry(
+		ctx,
+		operation,
+		backoff.WithBackOff(backoff.NewExponentialBackOff()),
+		backoff.WithMaxTries(deadLetterMaxTries),
+	)
 	if err != nil {
-		var kafkaErr kafka.Error
-		if errors.As(err, &kafkaErr) && kafkaErr.Code() == kafka.ErrTimedOut {
-			return nil
-		}
-
-		return err
+		return errors.Wrapf(ErrDeadLetterUnavailable, "topic %s: %s", topic, err)
 	}
 
-	ctx := log.WithLogger(
-		context.Background(),
-		c.createLogger().WithFields(
-			log.NewField("message-offset", msg.TopicPartition.Offset),
-			log.NewField("message-partition", msg.TopicPartition.Partition),
-		),
-	)
-
-	log.Debug(ctx, "starting read message")
-
-	if err := c.processMessage(ctx, msg); err != nil {
-		log.Error(ctx, errors.Wrap(err, "error when processing message"))
-		return err
-	}
-
-	if _, err := c.client.CommitMessage(msg); err != nil {
-		log.Error(ctx, errors.Wrap(err, "error when trying to commit message"))
-		return err
-	}
-
-	log.Debug(ctx, "message committed")
+	log.Warn(ctx, "record sent to dead letter topic", log.WarningTypeCritical)
 
 	return nil
 }
 
-func (c defaultConsumer[T]) createLogger() log.Logger {
-	return c.logger.WithFields(
-		log.NewField(
-			loggerTraceKey,
-			c.stringGenerator(),
-		),
-	)
-}
+func (c *defaultConsumer[T]) deadLetterTopicFor(record stream.Record) string {
+	if c.deadLetterTopic != "" {
+		return c.deadLetterTopic
+	}
 
-func (c defaultConsumer[T]) shutdown() {
-	defer func() { _ = c.client.Close() }()
-
-	c.shutdownStarted <- struct{}{}
-
-	<-c.shutdownFinished
+	return fmt.Sprintf("%s-%s", record.Topic, deadLetterSuffix)
 }

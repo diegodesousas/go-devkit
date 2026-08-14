@@ -7,19 +7,23 @@ import (
 
 // Handler is the user code a Consumer drives.
 //
-// ID names the consumer group, Topic the topic to read. ShouldSkip is consulted
-// before Handle and lets a message be acknowledged without processing.
-// ConfigRetry declares which errors are worth retrying and how long to keep
-// trying; it is consulted on every failure, so it must be cheap.
+// It has one method. Everything the previous contract demanded - the group id,
+// the topic, whether to skip, the retry policy - moved to where it belongs:
+// the group and topic are parameters of the reader, which is what actually
+// subscribes, and skipping and retrying are policy, configured with options.
 //
-// Handle receives a context carrying a logger scoped to the message. Returning
-// nil commits the offset.
+// Handle receives a context carrying a logger scoped to the record and the
+// trace continued from the producer. The context is cancelled when the
+// consumer shuts down, so a long handler should honour it.
+//
+// Handle is called concurrently - one goroutine per partition in the batch
+// being processed, serial within each - so a handler holding state must be
+// safe for concurrent use.
+//
+// Returning nil marks the record processed and allows its offset to be
+// committed.
 type Handler[T any] interface {
-	ID() string
-	Topic() string
-	ShouldSkip(content T) bool
 	Handle(ctx context.Context, content T) error
-	ConfigRetry() ConfigRetry
 }
 
 // ConfigRetry is a handler retry policy.
@@ -28,6 +32,9 @@ type Handler[T any] interface {
 // else goes straight to the dead letter topic. The remaining fields configure
 // the exponential backoff, and a retry sequence that exceeds MaxElapsedTime is
 // abandoned to the dead letter topic as well.
+//
+// A zero MaxElapsedTime is not "no limit": the backoff applies its own default
+// of 15 minutes. Set it explicitly - see WithMaxElapsedTime.
 //
 // The zero value retries nothing. Build one with NewConfigRetry or as a
 // literal.
@@ -58,7 +65,11 @@ func WithRetryableErrors(errs ...error) ConfigRetryOption {
 	}
 }
 
-// WithInitialInterval sets the delay before the first retry.
+// WithInitialInterval sets the first interval of the backoff, from which the
+// delays grow exponentially.
+//
+// It is not a delay before the first retry: the backoff waits between attempts,
+// so the first retry follows the failure immediately.
 func WithInitialInterval(initialInterval time.Duration) ConfigRetryOption {
 	return func(retrySettings configRetrySettings) configRetrySettings {
 		retrySettings.initialInterval = initialInterval
@@ -71,7 +82,10 @@ func WithInitialInterval(initialInterval time.Duration) ConfigRetryOption {
 // sent to the dead letter topic.
 //
 // The consumer does not poll while retrying, so a value beyond the broker
-// session timeout gets the consumer evicted from its group.
+// session timeout gets the consumer evicted from its group. Leaving it unset
+// does not avoid that: the backoff then falls back to its own default of 15
+// minutes, which is beyond any session timeout. A policy that retries anything
+// should say how long for.
 func WithMaxElapsedTime(maxElapsedTime time.Duration) ConfigRetryOption {
 	return func(retrySettings configRetrySettings) configRetrySettings {
 		retrySettings.maxElapsedTime = maxElapsedTime

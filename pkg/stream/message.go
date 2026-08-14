@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/pkg/errors"
 )
 
@@ -118,21 +117,22 @@ func (t textMessage) NewWithData(data any) Message {
 }
 
 // NewMessageType selects the Message implementation matching the
-// DEVKIT_CONTENT_TYPE header of a Kafka message.
+// ContentTypeHeaderKey header of a record.
 //
 // It returns ErrUnknownMessageType when the header is absent or names an
 // encoding this package does not implement - which is what makes the consumer
-// route the message to the dead letter topic instead of guessing.
-func NewMessageType(message *kafka.Message) (Message, error) {
-	for _, header := range message.Headers {
-		if header.Key == ContentTypeHeaderKey {
-			switch string(header.Value) {
-			case jsonType, postgresType:
-				return NewJSONMessage(message.Value), nil
-			case textType:
-				return NewTextMessage(string(message.Value)), nil
-			}
-		}
+// route the record to the dead letter topic instead of guessing.
+func NewMessageType(record Record) (Message, error) {
+	contentType, ok := record.Header(ContentTypeHeaderKey)
+	if !ok {
+		return nil, ErrUnknownMessageType
+	}
+
+	switch string(contentType) {
+	case jsonType, postgresType:
+		return NewJSONMessage(record.Value), nil
+	case textType:
+		return NewTextMessage(string(record.Value)), nil
 	}
 
 	return nil, ErrUnknownMessageType

@@ -2,161 +2,57 @@ package consumer_test
 
 import (
 	"context"
-	"testing"
-	"time"
-
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 
 	"github.com/diegodesousas/go-devkit/pkg/stream"
-	"github.com/diegodesousas/go-devkit/pkg/stream/consumer"
 	"github.com/stretchr/testify/mock"
 )
 
-// waitForCallsTimeout only has to be long enough to rule out a genuine hang.
-// It is never reached on a healthy run, so a generous value costs nothing and
-// keeps loaded CI runners out of trouble.
-const waitForCallsTimeout = time.Second * 2
-
-// waitForCalls blocks until the consumer goroutine has signalled count calls.
-//
-// The consumer processes messages on its own goroutine, so a test that sleeps
-// a fixed duration before calling shutdown is betting on the scheduler twice
-// over: sleep too little and the expected calls have not happened yet, sleep
-// too much and the loop polls once more than the mock allows. Waiting on the
-// call itself removes both bets.
-func waitForCalls(t *testing.T, calls <-chan struct{}, count int) {
-	timeout := time.After(waitForCallsTimeout)
-
-	for i := 0; i < count; i++ {
-		select {
-		case <-calls:
-		case <-timeout:
-			t.Fatalf("timed out waiting for call %d of %d", i+1, count)
-		}
-	}
-}
-
-type DispatcherMock struct {
+type readerMock struct {
 	mock.Mock
 }
 
-func (d *DispatcherMock) Dispatch(ctx context.Context, topic string, key string, content stream.Message) error {
-	arguments := d.Called(ctx, topic, key, content)
+func (r *readerMock) Poll(ctx context.Context) ([]stream.Record, error) {
+	args := r.Called(ctx)
 
-	return arguments.Error(0)
+	records, _ := args.Get(0).([]stream.Record)
+
+	return records, args.Error(1)
 }
 
-func (d *DispatcherMock) Shutdown() {
-	_ = d.Called()
+func (r *readerMock) Commit(ctx context.Context, records ...stream.Record) error {
+	args := r.Called(ctx, records)
+
+	return args.Error(0)
 }
 
-type FactoryMock struct {
+func (r *readerMock) Close() error {
+	args := r.Called()
+
+	return args.Error(0)
+}
+
+type dispatcherMock struct {
 	mock.Mock
 }
 
-func (f *FactoryMock) New(groupID string) (consumer.Client, error) {
-	arguments := f.Called(groupID)
+func (d *dispatcherMock) Dispatch(ctx context.Context, topic, key string, content stream.Message) error {
+	args := d.Called(ctx, topic, key, content)
 
-	return arguments.Get(0).(consumer.Client), arguments.Error(1)
+	return args.Error(0)
 }
 
-type ClientMock struct {
+func (d *dispatcherMock) Close(ctx context.Context) error {
+	args := d.Called(ctx)
+
+	return args.Error(0)
+}
+
+type handlerMock struct {
 	mock.Mock
 }
 
-func (c *ClientMock) Subscribe(topic string, cb kafka.RebalanceCb) error {
-	arguments := c.Called(topic, cb)
+func (h *handlerMock) Handle(ctx context.Context, content string) error {
+	args := h.Called(ctx, content)
 
-	return arguments.Error(0)
-}
-
-func (c *ClientMock) ReadMessage(timeout time.Duration) (*kafka.Message, error) {
-	arguments := c.Called(timeout)
-
-	return arguments.Get(0).(*kafka.Message), arguments.Error(1)
-}
-
-func (c *ClientMock) CommitMessage(m *kafka.Message) ([]kafka.TopicPartition, error) {
-	arguments := c.Called(m)
-
-	return arguments.Get(0).([]kafka.TopicPartition), arguments.Error(1)
-}
-
-func (c *ClientMock) Close() error {
-	arguments := c.Called()
-
-	return arguments.Error(0)
-}
-
-type HandlerTextMock[T string] struct {
-	mock.Mock
-}
-
-func (h *HandlerTextMock[T]) ID() string {
-	arguments := h.Called()
-
-	return arguments.String(0)
-}
-
-func (h *HandlerTextMock[T]) Topic() string {
-	arguments := h.Called()
-
-	return arguments.String(0)
-}
-
-func (h *HandlerTextMock[T]) ShouldSkip(content string) bool {
-	arguments := h.Called(content)
-
-	return arguments.Bool(0)
-}
-
-func (h *HandlerTextMock[T]) Handle(ctx context.Context, content string) error {
-	arguments := h.Called(ctx, content)
-
-	return arguments.Error(0)
-}
-
-func (h *HandlerTextMock[T]) ConfigRetry() consumer.ConfigRetry {
-	arguments := h.Called()
-
-	return arguments.Get(0).(consumer.ConfigRetry)
-}
-
-type jsonMessageTest struct {
-	Test             string        `json:"test"`
-	InvalidJsonField chan struct{} `json:"invalid_json_field"`
-}
-
-type HandlerJsonMock[T jsonMessageTest] struct {
-	mock.Mock
-}
-
-func (h *HandlerJsonMock[T]) ID() string {
-	arguments := h.Called()
-
-	return arguments.String(0)
-}
-
-func (h *HandlerJsonMock[T]) Topic() string {
-	arguments := h.Called()
-
-	return arguments.String(0)
-}
-
-func (h *HandlerJsonMock[T]) ShouldSkip(content jsonMessageTest) bool {
-	arguments := h.Called(content)
-
-	return arguments.Bool(0)
-}
-
-func (h *HandlerJsonMock[T]) Handle(ctx context.Context, content jsonMessageTest) error {
-	arguments := h.Called(ctx, content)
-
-	return arguments.Error(0)
-}
-
-func (h *HandlerJsonMock[T]) ConfigRetry() consumer.ConfigRetry {
-	arguments := h.Called()
-
-	return arguments.Get(0).(consumer.ConfigRetry)
+	return args.Error(0)
 }

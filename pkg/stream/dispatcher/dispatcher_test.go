@@ -1,300 +1,113 @@
 package dispatcher_test
 
 import (
-    "bytes"
-    "context"
-    "testing"
+	"context"
+	"testing"
 
-    "github.com/pkg/errors"
-
-    "github.com/confluentinc/confluent-kafka-go/kafka"
-    "github.com/diegodesousas/go-devkit/pkg/stream"
-    "github.com/diegodesousas/go-devkit/pkg/stream/dispatcher"
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/mock"
+	"github.com/diegodesousas/go-devkit/pkg/stream"
+	"github.com/diegodesousas/go-devkit/pkg/stream/dispatcher"
+	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
-func assertKafkaMessage(message *kafka.Message, expectedTopic string, expectedKey, expectedPayload []byte) bool {
-    topic := *message.TopicPartition.Topic
+func TestDispatch_Success(t *testing.T) {
+	var (
+		expectedTopic = "orders"
+		expectedKey   = "order-1"
+	)
 
-    return expectedTopic == topic &&
-        message.TopicPartition.Partition == kafka.PartitionAny &&
-        bytes.Equal(message.Key, expectedKey) &&
-        bytes.Equal(expectedPayload, message.Value) &&
-        message.Headers[0].Key == "DEVKIT_CONTENT_TYPE" &&
-        bytes.Equal(message.Headers[0].Value, []byte("text"))
+	writer := &writerMock{}
+	writer.
+		On("Produce", mock.Anything, mock.MatchedBy(func(record stream.Record) bool {
+			contentType, ok := record.Header(stream.ContentTypeHeaderKey)
+
+			return record.Topic == expectedTopic &&
+				string(record.Key) == expectedKey &&
+				ok && string(contentType) == "json"
+		})).
+		Return(nil).
+		Once()
+
+	d := dispatcher.New(writer)
+
+	err := d.Dispatch(context.Background(), expectedTopic, expectedKey, stream.NewJSONMessage(map[string]string{"id": "1"}))
+
+	assert.Nil(t, err)
+	writer.AssertExpectations(t)
 }
 
-func Test_Dispatcher_Dispatch_Success(t *testing.T) {
-    expectedTopic := "topic-test"
-    expectedKey := []byte("key-test")
-    expectedMessage := "test message"
-    expectedPayload := []byte(expectedMessage)
+func TestDispatch_SerializeError(t *testing.T) {
+	writer := &writerMock{}
 
-    var expectedDeliveryChan chan kafka.Event
-    done := make(chan struct{}, 1)
+	d := dispatcher.New(writer)
 
-    clientMock := &ClientDispatcherClientMock{}
-    clientMock.
-        On(
-            "Produce",
-            mock.MatchedBy(func(message *kafka.Message) bool {
+	// A channel cannot be marshalled to JSON.
+	err := d.Dispatch(context.Background(), "orders", "key", stream.NewJSONMessage(make(chan int)))
 
-                return assertKafkaMessage(message, expectedTopic, expectedKey, expectedPayload)
-            }),
-            mock.MatchedBy(func(deliveryChan chan kafka.Event) bool {
-                expectedDeliveryChan = deliveryChan
-                done <- struct{}{}
-
-                return true
-            }),
-        ).
-        Return(nil).
-        Once()
-
-    d := dispatcher.New(clientMock)
-
-    go func() {
-        <-done
-
-        expectedDeliveryChan <- &kafka.Message{}
-    }()
-
-    err := d.Dispatch(context.Background(), expectedTopic, string(expectedKey), stream.NewTextMessage(expectedMessage))
-
-    assert.Nil(t, err)
-
-    clientMock.AssertExpectations(t)
+	assert.NotNil(t, err)
+	writer.AssertNotCalled(t, "Produce", mock.Anything, mock.Anything)
 }
 
-func Test_Dispatcher_Dispatch_Delivery_MsgTimedOutError(t *testing.T) {
-    expectedTopic := "topic-test"
-    expectedKey := []byte("key-test")
-    expectedMessage := "test message"
-    expectedPayload := []byte(expectedMessage)
+func TestDispatch_ProduceError(t *testing.T) {
+	expectedErr := errors.New("broker down")
 
-    var expectedDeliveryChan chan kafka.Event
-    done := make(chan struct{}, 1)
+	writer := &writerMock{}
+	writer.On("Produce", mock.Anything, mock.Anything).Return(expectedErr).Once()
 
-    clientMock := &ClientDispatcherClientMock{}
-    clientMock.
-        On(
-            "Produce",
-            mock.MatchedBy(func(message *kafka.Message) bool {
+	d := dispatcher.New(writer)
 
-                return assertKafkaMessage(message, expectedTopic, expectedKey, expectedPayload)
-            }),
-            mock.MatchedBy(func(deliveryChan chan kafka.Event) bool {
-                expectedDeliveryChan = deliveryChan
-                done <- struct{}{}
+	err := d.Dispatch(context.Background(), "orders", "key", stream.NewJSONMessage(map[string]string{}))
 
-                return true
-            }),
-        ).
-        Return(nil).
-        Once()
-
-    d := dispatcher.New(clientMock)
-
-    go func() {
-        <-done
-
-        expectedDeliveryChan <- &kafka.Message{
-            TopicPartition: kafka.TopicPartition{
-                Error: kafka.NewError(kafka.ErrMsgTimedOut, "test", false),
-            },
-        }
-    }()
-
-    err := d.Dispatch(context.Background(), expectedTopic, string(expectedKey), stream.NewTextMessage(expectedMessage))
-
-    assert.ErrorIs(t, err, stream.ErrProcessMessageTimedOut)
-
-    clientMock.AssertExpectations(t)
+	assert.ErrorIs(t, err, expectedErr)
+	writer.AssertExpectations(t)
 }
 
-func Test_Dispatcher_Dispatch_Delivery_UnhandledError(t *testing.T) {
-    expectedTopic := "topic-test"
-    expectedKey := []byte("key-test")
-    expectedMessage := "test message"
-    expectedPayload := []byte(expectedMessage)
+func TestDispatch_InjectsTraceHeaders(t *testing.T) {
+	var captured stream.Record
 
-    var expectedDeliveryChan chan kafka.Event
-    done := make(chan struct{}, 1)
+	writer := &writerMock{}
+	writer.
+		On("Produce", mock.Anything, mock.Anything).
+		Run(func(args mock.Arguments) {
+			captured = args.Get(1).(stream.Record)
+		}).
+		Return(nil).
+		Once()
 
-    clientMock := &ClientDispatcherClientMock{}
-    clientMock.
-        On(
-            "Produce",
-            mock.MatchedBy(func(message *kafka.Message) bool {
+	d := dispatcher.New(writer)
 
-                return assertKafkaMessage(message, expectedTopic, expectedKey, expectedPayload)
-            }),
-            mock.MatchedBy(func(deliveryChan chan kafka.Event) bool {
-                expectedDeliveryChan = deliveryChan
-                done <- struct{}{}
+	err := d.Dispatch(context.Background(), "orders", "key", stream.NewJSONMessage(map[string]string{}))
 
-                return true
-            }),
-        ).
-        Return(nil).
-        Once()
-
-    d := dispatcher.New(clientMock)
-
-    go func() {
-        <-done
-
-        expectedDeliveryChan <- &kafka.Message{
-            TopicPartition: kafka.TopicPartition{
-                Error: errors.New("unexpected delivery error"),
-            },
-        }
-    }()
-
-    err := d.Dispatch(context.Background(), expectedTopic, string(expectedKey), stream.NewTextMessage(expectedMessage))
-
-    assert.EqualError(t, err, "dispatcher delivery error: unexpected delivery error")
-
-    clientMock.AssertExpectations(t)
+	assert.Nil(t, err)
+	// Beyond the content type, the span context must ride along so the
+	// consumer can continue the trace.
+	assert.Greater(t, len(captured.Headers), 1)
 }
 
-func Test_Dispatcher_Dispatch_Kafka_Error(t *testing.T) {
-    expectedTopic := "topic-test"
-    expectedKey := []byte("key-test")
-    expectedMessage := "test message"
-    expectedPayload := []byte(expectedMessage)
+func TestClose(t *testing.T) {
+	writer := &writerMock{}
+	writer.On("Flush", mock.Anything).Return(nil).Once()
+	writer.On("Close").Return(nil).Once()
 
-    var expectedDeliveryChan chan kafka.Event
-    done := make(chan struct{}, 1)
+	d := dispatcher.New(writer)
 
-    clientMock := &ClientDispatcherClientMock{}
-    clientMock.
-        On(
-            "Produce",
-            mock.MatchedBy(func(message *kafka.Message) bool {
-
-                return assertKafkaMessage(message, expectedTopic, expectedKey, expectedPayload)
-
-            }),
-            mock.MatchedBy(func(deliveryChan chan kafka.Event) bool {
-                expectedDeliveryChan = deliveryChan
-                done <- struct{}{}
-
-                return true
-            }),
-        ).
-        Return(nil).
-        Once()
-
-    d := dispatcher.New(clientMock)
-
-    go func() {
-        <-done
-
-        err := kafka.NewError(kafka.ErrApplication, "test", false)
-        expectedDeliveryChan <- &err
-    }()
-
-    err := d.Dispatch(context.Background(), expectedTopic, string(expectedKey), stream.NewTextMessage(expectedMessage))
-
-    assert.EqualError(t, err, "dispatcher kafka error: test")
-
-    clientMock.AssertExpectations(t)
+	assert.Nil(t, d.Close(context.Background()))
+	writer.AssertExpectations(t)
 }
 
-func Test_Dispatcher_Dispatch_Delivery_Unexpected_Error(t *testing.T) {
-    expectedTopic := "topic-test"
-    expectedKey := []byte("key-test")
-    expectedMessage := "test message"
-    expectedPayload := []byte(expectedMessage)
+func TestClose_FlushError(t *testing.T) {
+	expectedErr := errors.New("flush failed")
 
-    var expectedDeliveryChan chan kafka.Event
-    done := make(chan struct{}, 1)
+	writer := &writerMock{}
+	writer.On("Flush", mock.Anything).Return(expectedErr).Once()
+	writer.On("Close").Return(nil).Once()
 
-    clientMock := &ClientDispatcherClientMock{}
-    clientMock.
-        On(
-            "Produce",
-            mock.MatchedBy(func(message *kafka.Message) bool {
+	d := dispatcher.New(writer)
 
-                return assertKafkaMessage(message, expectedTopic, expectedKey, expectedPayload)
+	err := d.Close(context.Background())
 
-            }),
-            mock.MatchedBy(func(deliveryChan chan kafka.Event) bool {
-                expectedDeliveryChan = deliveryChan
-                done <- struct{}{}
-
-                return true
-            }),
-        ).
-        Return(nil).
-        Once()
-
-    d := dispatcher.New(clientMock)
-
-    go func() {
-        <-done
-
-        expectedDeliveryChan <- &kafka.OffsetsCommitted{
-            Error: errors.New("unexpected err"),
-        }
-    }()
-
-    err := d.Dispatch(context.Background(), expectedTopic, string(expectedKey), stream.NewTextMessage(expectedMessage))
-
-    assert.EqualError(t, err, "dispatcher unexpected error: OffsetsCommitted (unexpected err, [])")
-
-    clientMock.AssertExpectations(t)
-}
-
-func Test_Dispatcher_Dispatch_Client_Produce_Error(t *testing.T) {
-    expectedTopic := "topic-test"
-    expectedKey := []byte("key-test")
-    expectedMessage := "test message"
-
-    clientMock := &ClientDispatcherClientMock{}
-    clientMock.
-        On("Produce", mock.Anything, mock.Anything).
-        Return(errors.New("unexpected error")).
-        Once()
-
-    d := dispatcher.New(clientMock)
-
-    err := d.Dispatch(context.Background(), expectedTopic, string(expectedKey), stream.NewTextMessage(expectedMessage))
-
-    assert.EqualError(t, err, "dispatcher: unexpected error")
-
-    clientMock.AssertExpectations(t)
-}
-
-func Test_Dispatcher_Dispatch_Json_Marshaller_Error(t *testing.T) {
-    expectedTopic := "topic-test"
-    expectedKey := "key-test"
-
-    clientMock := &ClientDispatcherClientMock{}
-
-    d := dispatcher.New(clientMock)
-
-    err := d.Dispatch(context.Background(), expectedTopic, expectedKey, stream.NewJSONMessage(make(chan string)))
-
-    assert.EqualError(t, err, "dispatcher: json: unsupported type: chan string")
-
-    clientMock.AssertExpectations(t)
-}
-
-func Test_Dispatcher_Shutdown_Success(t *testing.T) {
-    clientMock := &ClientDispatcherClientMock{}
-    clientMock.
-        On("Flush", 1000).
-        Return(0).
-        Once().
-        On("Close").
-        Once()
-
-    d := dispatcher.New(clientMock)
-
-    d.Shutdown()
-
-    clientMock.AssertExpectations(t)
+	// Close still closes the writer, but reports what was lost.
+	assert.ErrorIs(t, err, expectedErr)
+	writer.AssertExpectations(t)
 }

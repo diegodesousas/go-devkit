@@ -1,26 +1,30 @@
 package dispatcher_test
 
 import (
-	"github.com/confluentinc/confluent-kafka-go/kafka"
+	"context"
+
+	"github.com/diegodesousas/go-devkit/pkg/stream"
 	"github.com/stretchr/testify/mock"
 )
 
-type ClientDispatcherClientMock struct {
+type writerMock struct {
 	mock.Mock
 }
 
-func (c *ClientDispatcherClientMock) Produce(msg *kafka.Message, deliveryChan chan kafka.Event) error {
-	arguments := c.Called(msg, deliveryChan)
+func (w *writerMock) Produce(ctx context.Context, record stream.Record) error {
+	args := w.Called(ctx, record)
 
-	return arguments.Error(0)
+	return args.Error(0)
 }
 
-func (c *ClientDispatcherClientMock) Close() {
-	c.Called()
+func (w *writerMock) Flush(ctx context.Context) error {
+	args := w.Called(ctx)
+
+	return args.Error(0)
 }
 
-func (c *ClientDispatcherClientMock) Flush(timeoutMs int) int {
-	arguments := c.Called(timeoutMs)
+func (w *writerMock) Close() error {
+	args := w.Called()
 
-	return arguments.Int(0)
+	return args.Error(0)
 }

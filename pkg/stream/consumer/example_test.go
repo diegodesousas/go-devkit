@@ -2,7 +2,6 @@ package consumer_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,6 +10,7 @@ import (
 	"github.com/diegodesousas/go-devkit/pkg/log"
 	"github.com/diegodesousas/go-devkit/pkg/stream/consumer"
 	"github.com/diegodesousas/go-devkit/pkg/stream/dispatcher"
+	"github.com/diegodesousas/go-devkit/pkg/stream/kafka"
 	"github.com/pkg/errors"
 )
 
@@ -25,66 +25,48 @@ var errChargeUnavailable = errors.New("charge service unavailable")
 
 type orderHandler struct{}
 
-func (orderHandler) ID() string    { return "billing" }
-func (orderHandler) Topic() string { return "orders" }
-
-// ShouldSkip runs before Handle and acknowledges the message without processing
-// it, which is how a consumer ignores traffic it does not care about.
-func (orderHandler) ShouldSkip(o orderPlaced) bool { return o.Total == 0 }
-
 func (orderHandler) Handle(ctx context.Context, o orderPlaced) error {
 	log.Info(ctx, "charging order", log.NewField("order-id", o.ID))
 	return nil
 }
 
-// Only errors listed here are retried; anything else goes straight to the dead
-// letter topic.
-func (orderHandler) ConfigRetry() consumer.ConfigRetry {
-	return consumer.NewConfigRetry(
-		consumer.WithRetryableErrors(errChargeUnavailable),
-		consumer.WithInitialInterval(time.Second),
-		consumer.WithMaxInterval(5*time.Second),
-		consumer.WithMaxElapsedTime(30*time.Second),
-	)
-}
-
 // Requires a Kafka broker, so this example is compiled but not run.
 func ExampleNew() {
-	client, err := dispatcher.NewClient(dispatcher.WithBootstrapServers("localhost:9092"))
+	writer, err := kafka.NewWriter(kafka.WithBrokers("localhost:9092"))
 	if err != nil {
 		panic(err)
 	}
 
-	// The dispatcher is what publishes to the dead letter topic, so a consumer
-	// needs one even when the handler never fails.
-	d := dispatcher.New(client)
-	defer d.Shutdown()
+	// The dispatcher is what publishes to the dead letter topic, so a
+	// consumer needs one even when the handler never fails.
+	dlt := dispatcher.New(writer)
+	defer func() { _ = dlt.Close(context.Background()) }()
 
-	factory := consumer.NewFactory(consumer.WithBootstrapServer("localhost:9092"))
-
-	c, err := consumer.New[orderPlaced](d, factory, orderHandler{})
+	reader, err := kafka.NewReader("devkit-billing", []string{"orders"},
+		kafka.WithBrokers("localhost:9092"),
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	shutdown, err := c.Run() // returns immediately; the loop runs in the background
+	c, err := consumer.New[orderPlaced](reader, dlt, orderHandler{},
+		// Only errors listed here are retried; anything else goes straight
+		// to the dead letter topic.
+		consumer.WithRetry[orderPlaced](consumer.NewConfigRetry(
+			consumer.WithRetryableErrors(errChargeUnavailable),
+			consumer.WithInitialInterval(time.Second),
+			consumer.WithMaxElapsedTime(30*time.Second),
+		)),
+	)
 	if err != nil {
 		panic(err)
 	}
 
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
-	// The loop reports its own failures here, so a broker error stops the
-	// process rather than leaving it running and consuming nothing.
-	go func() {
-		if err := <-c.ListenShutdown(); err != nil {
-			fmt.Println("consumer stopped:", err)
-			interrupt <- syscall.SIGTERM
-		}
-	}()
-
-	<-interrupt
-
-	shutdown() // waits for the in-flight message, then closes the client
+	// Run blocks until ctx is cancelled or the reader fails.
+	if err := c.Run(ctx); err != nil {
+		panic(err)
+	}
 }

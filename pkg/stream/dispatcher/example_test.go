@@ -6,6 +6,7 @@ import (
 
 	"github.com/diegodesousas/go-devkit/pkg/stream"
 	"github.com/diegodesousas/go-devkit/pkg/stream/dispatcher"
+	"github.com/diegodesousas/go-devkit/pkg/stream/kafka"
 	"github.com/pkg/errors"
 )
 
@@ -16,15 +17,13 @@ type orderPlaced struct {
 
 // Requires a Kafka broker, so this example is compiled but not run.
 func ExampleNew() {
-	client, err := dispatcher.NewClient(
-		dispatcher.WithBootstrapServers("localhost:9092"),
-	)
+	writer, err := kafka.NewWriter(kafka.WithBrokers("localhost:9092"))
 	if err != nil {
 		panic(err)
 	}
 
-	d := dispatcher.New(client)
-	defer d.Shutdown() // flushes buffered messages - skipping it loses them
+	d := dispatcher.New(writer)
+	defer func() { _ = d.Close(context.Background()) }()
 
 	order := orderPlaced{ID: "42", Total: 250}
 
@@ -37,16 +36,13 @@ func ExampleNew() {
 // Dispatch blocks until the broker confirms the message, so a delivery timeout
 // is reported as an error rather than discovered later.
 func ExampleDispatcher_Dispatch_timeout() {
-	client, err := dispatcher.NewClient(
-		dispatcher.WithBootstrapServers("localhost:9092"),
-		dispatcher.WithDispatchTimeoutMs(5000),
-	)
+	writer, err := kafka.NewWriter(kafka.WithBrokers("localhost:9092"))
 	if err != nil {
 		panic(err)
 	}
 
-	d := dispatcher.New(client)
-	defer d.Shutdown()
+	d := dispatcher.New(writer)
+	defer func() { _ = d.Close(context.Background()) }()
 
 	order := orderPlaced{ID: "42", Total: 250}
 

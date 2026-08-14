@@ -16,7 +16,7 @@ Não há binário — só `pkg/` (a lib) e `examples/` (um `package main` por re
 | `make next-version [BUMP=…]` | Só imprime a próxima versão. Não escreve nada — serve para conferir o cálculo |
 | `make release [BUMP=…]` | Corta a versão: valida, testa, cria a tag anotada, dá push e abre o GitHub Release |
 
-`CGO_ENABLED=1` é obrigatório: `confluent-kafka-go v1.9.2` embute librdkafka via cgo, e `-race` também depende disso.
+A biblioteca é pura Go e compila sem cgo. O `-race` continua exigindo `CGO_ENABLED=1`, mas isso é uma exigência do toolchain Go, não de alguma dependência.
 
 ## Release
 
