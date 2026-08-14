@@ -183,14 +183,34 @@ func TestRun_StopsOnContextDeadline(t *testing.T) {
 	})
 }
 
+// dispatchedMessage matches a stream.Message by what it would actually put on
+// the wire: its encoding and its serialized bytes.
+//
+// Matching on mock.Anything instead leaves the whole dead letter payload
+// unverified - a consumer that dead-lettered an empty message, or the wrong
+// one, would satisfy every expectation.
+func dispatchedMessage(contentType, payload string) any {
+	return mock.MatchedBy(func(message stream.Message) bool {
+		serialized, err := message.Serialize()
+
+		return err == nil && message.Type() == contentType && string(serialized) == payload
+	})
+}
+
 // A non-retryable failure sends the record to the dead letter topic and the
 // offset is still committed - the record is resolved, not lost.
+//
+// The message that lands there is the decoded payload re-encoded the way it
+// arrived, not the raw bytes: toDeadLetter goes through NewWithData, so a
+// record that came in as JSON leaves as JSON.
 func TestRun_DeadLettersNonRetryableFailure(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var (
-			expectedTopic      = "orders"
-			expectedDLT        = "orders-dlt"
-			expectedHandlerErr = errors.New("permanent")
+			expectedTopic       = "orders"
+			expectedDLT         = "orders-dlt"
+			expectedHandlerErr  = errors.New("permanent")
+			expectedContentType = "json"
+			expectedPayload     = `"payload"`
 		)
 
 		record := jsonRecord(expectedTopic, 0, 1, "payload")
@@ -205,7 +225,11 @@ func TestRun_DeadLettersNonRetryableFailure(t *testing.T) {
 		handler.On("Handle", mock.Anything, "payload").Return(expectedHandlerErr).Once()
 
 		dlt := &dispatcherMock{}
-		dlt.On("Dispatch", mock.Anything, expectedDLT, "key", mock.Anything).Return(nil).Once()
+		dlt.On("Dispatch", mock.Anything, expectedDLT, "key",
+			dispatchedMessage(expectedContentType, expectedPayload)).Return(nil).Once()
+		// Catches a wrong payload so the mismatch is reported by
+		// AssertExpectations rather than by a panic inside a worker goroutine.
+		dlt.On("Dispatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		c, err := consumer.New[string](reader, dlt, handler)
 		assert.Nil(t, err)
@@ -594,14 +618,24 @@ func TestRun_RetriesRetryableError(t *testing.T) {
 }
 
 // An undecodable payload goes to the dead letter topic as text and is committed.
+//
+// This is the other of the two dead letter paths: nothing decoded it, so
+// nothing can re-encode it, and the record's bytes are forwarded verbatim as
+// text. Asserting the payload is what separates it from the JSON path - both
+// were previously matched by mock.Anything, so neither was verified at all.
 func TestRun_DeadLettersUndecodableRecord(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		var (
+			expectedContentType = "text"
+			expectedPayload     = "not json"
+		)
+
 		record := stream.Record{
 			Topic:     "orders",
 			Partition: 0,
 			Offset:    1,
 			Key:       []byte("key"),
-			Value:     []byte("not json"),
+			Value:     []byte(expectedPayload),
 			// No content type header at all.
 		}
 
@@ -612,7 +646,11 @@ func TestRun_DeadLettersUndecodableRecord(t *testing.T) {
 		reader.On("Close").Return(nil).Once()
 
 		dlt := &dispatcherMock{}
-		dlt.On("Dispatch", mock.Anything, "orders-dlt", "key", mock.Anything).Return(nil).Once()
+		dlt.On("Dispatch", mock.Anything, "orders-dlt", "key",
+			dispatchedMessage(expectedContentType, expectedPayload)).Return(nil).Once()
+		// See TestRun_DeadLettersNonRetryableFailure: catches a wrong payload
+		// so the mismatch is an assertion, not a panic.
+		dlt.On("Dispatch", mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		handler := &handlerMock{}
 
