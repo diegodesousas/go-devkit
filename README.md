@@ -36,28 +36,9 @@ The reference documentation lives on [pkg.go.dev](https://pkg.go.dev/github.com/
 
 v0.3.0 replaces `confluent-kafka-go` with [franz-go](https://github.com/twmb/franz-go) and redesigns the consumer. Every break is in `pkg/stream`, `pkg/stream/consumer` and `pkg/stream/dispatcher`. The library is now pure Go: `CGO_ENABLED=1` is no longer required to build it.
 
-### Read this first: keep your consumer group id
-
-Before v0.3.0 the group id was assembled for you as `devkit-` + whatever `Handler.ID()` returned. A handler whose `ID()` was `billing` joined the group **`devkit-billing`**.
-
-`Handler.ID()` no longer exists, and `kafka.NewReader` takes the group id as its first parameter. **You must pass the old name, prefix included.** Kafka has no way to tell that a different name means the same consumer: it sees a group with no committed offsets, and the default start position is the earliest record still in retention — so the first deploy would reprocess the entire topic. In production that is duplicate charges and duplicate emails.
-
-```go
-// Handler.ID() used to return "billing", so the group id was "devkit-billing".
-reader, err := kafka.NewReader(
-    "devkit-billing",              // exactly the old group id, "devkit-" and all
-    []string{"orders"},
-    kafka.WithBrokers("localhost:9092"),
-)
-```
-
-Verify against the cluster before deploying — `kafka-consumer-groups --list` shows the names your consumers are actually using.
-
-### API changes
-
 | Before | After |
 |---|---|
-| `Handler.ID()`, `Handler.Topic()` | parameters of `kafka.NewReader(groupID, topics)` — see above |
+| `Handler.ID()`, `Handler.Topic()` | parameters of `kafka.NewReader(groupID, topics)` |
 | `consumer.NewFactory(...)` | `kafka.NewReader(groupID, topics, ...)` |
 | `dispatcher.NewClient(...)` | `kafka.NewWriter(...)` |
 | `consumer.Client`, `consumer.Factory` | `stream.Reader` |
@@ -68,8 +49,9 @@ Verify against the cluster before deploying — `kafka-consumer-groups --list` s
 | `stream.NewMessageType(*kafka.Message)` | `stream.NewMessageType(stream.Record)` |
 | `consumer.WithBootstrapServer`, `dispatcher.WithBootstrapServers` | one `kafka.WithBrokers`, shared by reader and writer |
 
-Two behaviour changes worth knowing about, neither of which shows up as a compile error:
+Three changes worth knowing about, none of which shows up as a compile error:
 
+- **The group id is now yours to pass.** It used to be assembled as `devkit-` + `Handler.ID()`. Kafka cannot tell that a new name means the same consumer — it sees a group with no committed offsets and starts from the earliest record in retention — so an existing deployment has to pass its old name, prefix included.
 - **`Handle` is now called concurrently**, one goroutine per partition of a batch and serial within each. A handler holding state has to be safe for concurrent use.
 - **The consumer stops itself** with `consumer.ErrDeadLetterUnavailable` when every partition it is consuming has halted on a failed dead letter publication. Restarting is the recovery path; nothing is committed past an unresolved record, so nothing is lost.
 
