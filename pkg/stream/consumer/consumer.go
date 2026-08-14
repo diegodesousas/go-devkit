@@ -90,12 +90,20 @@ func New[T any](
 	}, nil
 }
 
-// Run polls and processes until ctx is cancelled or the reader fails.
+// Run polls and processes until ctx is cancelled or the loop can make no more
+// progress.
 //
 // It blocks. Cancelling ctx ends the run without an error: the record each
 // partition has in flight is finished, the records the batch had not started
 // are left for the next process, what completed is committed, and Run returns
 // nil. A reader failure returns that error.
+//
+// Run also returns, with ErrDeadLetterUnavailable, once every partition
+// delivering records has halted. A halt stops one partition so the others can
+// carry on; with no others left there is nothing to carry on, and a consumer
+// that kept polling would drop every record it fetched and commit nothing -
+// draining the topic at whatever speed the broker serves it, advancing nothing.
+// Halts are only cleared by a restart, which is what returning asks for.
 func (c *defaultConsumer[T]) Run(ctx context.Context) error {
 	defer func() { _ = c.reader.Close() }()
 
@@ -117,7 +125,7 @@ func (c *defaultConsumer[T]) Run(ctx context.Context) error {
 			continue
 		}
 
-		committable := c.processBatch(ctx, records)
+		committable, allHalted := c.processBatch(ctx, records)
 
 		if len(committable) > 0 {
 			// Commit with a context that outlives cancellation: work that
@@ -129,6 +137,13 @@ func (c *defaultConsumer[T]) Run(ctx context.Context) error {
 			if err != nil {
 				return err
 			}
+		}
+
+		// Checked after the commit, so the prefix the halted partition did
+		// resolve is still acknowledged. A cancelled context is not reported
+		// as a halt: the next iteration returns nil for it.
+		if allHalted && ctx.Err() == nil {
+			return errors.WithStack(ErrDeadLetterUnavailable)
 		}
 	}
 }
@@ -167,7 +182,8 @@ type partitionResult struct {
 }
 
 // processBatch fans the batch out by partition and returns the records whose
-// offsets may be committed.
+// offsets may be committed, plus whether every partition in the batch is now
+// halted - the point at which the loop has nothing left to make progress on.
 //
 // Records within a partition are processed in order; partitions run
 // concurrently. That preserves the only ordering Kafka actually guarantees
@@ -175,10 +191,13 @@ type partitionResult struct {
 //
 // Records belonging to a halted partition are dropped unprocessed: that
 // partition's offset must not move again.
-func (c *defaultConsumer[T]) processBatch(ctx context.Context, records []stream.Record) []stream.Record {
+func (c *defaultConsumer[T]) processBatch(ctx context.Context, records []stream.Record) ([]stream.Record, bool) {
+	delivered := make(map[partitionKey]struct{})
 	byPartition := make(map[partitionKey][]stream.Record)
 	for _, record := range records {
 		key := partitionKey{topic: record.Topic, partition: record.Partition}
+		delivered[key] = struct{}{}
+
 		if _, halted := c.halted[key]; halted {
 			continue
 		}
@@ -212,7 +231,19 @@ func (c *defaultConsumer[T]) processBatch(ctx context.Context, records []stream.
 		}
 	}
 
-	return committable
+	return committable, c.allHalted(delivered)
+}
+
+// allHalted reports whether every partition that delivered records in this
+// batch is halted, counting the halts this batch itself just recorded.
+func (c *defaultConsumer[T]) allHalted(delivered map[partitionKey]struct{}) bool {
+	for key := range delivered {
+		if _, halted := c.halted[key]; !halted {
+			return false
+		}
+	}
+
+	return true
 }
 
 // halt stops committing a partition for the rest of this process's life.

@@ -14,6 +14,8 @@
 //
 // Run blocks. Cancelling ctx ends it without an error, once the record each
 // partition has in flight is finished; a reader failure returns that error.
+// Run also returns ErrDeadLetterUnavailable once every partition has halted -
+// see below.
 //
 // Records within a partition are processed in order, but Handle is called
 // concurrently across the partitions of a batch - one goroutine per
@@ -37,7 +39,9 @@
 // unresolved record and the next process redelivers it. The partition does
 // not recover on its own even if the dead letter topic comes back, because a
 // running consumer has no way to notice that it has. Other partitions are
-// unaffected.
+// unaffected - and when there are none left, Run gives up and returns
+// ErrDeadLetterUnavailable rather than poll a topic it can no longer make any
+// progress on.
 //
 // Each record gets its own logger, carrying the topic, the partition, the
 // offset and a freshly generated trace id. The handler reads it with

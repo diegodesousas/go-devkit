@@ -216,13 +216,16 @@ func TestRun_DeadLettersNonRetryableFailure(t *testing.T) {
 
 // When the dead letter topic is unavailable, the partition is not committed -
 // nothing is lost and the record is redelivered later.
+//
+// It is also the batch's only partition, so with it halted the consumer has
+// nothing left to make progress on: Run gives up with ErrDeadLetterUnavailable
+// instead of polling a topic whose every record it would now drop.
 func TestRun_HaltsPartitionWhenDeadLetterFails(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		record := jsonRecord("orders", 0, 1, "payload")
 
 		reader := &readerMock{}
 		reader.On("Poll", mock.Anything).Return([]stream.Record{record}, nil).Once()
-		reader.On("Poll", mock.Anything).Return(nil, stream.ErrReaderClosed)
 		reader.On("Close").Return(nil).Once()
 
 		handler := &handlerMock{}
@@ -235,10 +238,63 @@ func TestRun_HaltsPartitionWhenDeadLetterFails(t *testing.T) {
 		c, err := consumer.New[string](reader, dlt, handler)
 		assert.Nil(t, err)
 
-		assert.Nil(t, c.Run(context.Background()))
+		assert.ErrorIs(t, c.Run(context.Background()), consumer.ErrDeadLetterUnavailable)
 
 		// Nothing was committable, so Commit must never have been called.
 		reader.AssertNotCalled(t, "Commit", mock.Anything, mock.Anything)
+		reader.AssertExpectations(t)
+	})
+}
+
+// A consumer whose every partition has halted stops instead of spinning.
+//
+// The halt rule protects the partitions that are still healthy; with none of
+// them left it protects nothing, and the loop degenerates into polling and
+// discarding at whatever rate the broker serves - burning CPU and network,
+// committing nothing, with a single log line from the moment of the halt as its
+// only outward sign. Halts last for the life of the process by design, so the
+// only way out is the restart that returning asks for.
+func TestRun_StopsWhenEveryPartitionHasHalted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		bad0 := jsonRecord("orders", 0, 1, "bad")
+		good1 := jsonRecord("orders", 1, 1, "good")
+		bad0Again := jsonRecord("orders", 0, 2, "bad")
+		bad1 := jsonRecord("orders", 1, 2, "bad")
+
+		reader := &readerMock{}
+		// The first poll halts partition 0 while partition 1 keeps committing,
+		// so the run goes on. The second halts partition 1 too, which leaves
+		// the consumer with nothing it is still allowed to commit.
+		reader.On("Poll", mock.Anything).Return([]stream.Record{bad0, good1}, nil).Once()
+		reader.On("Poll", mock.Anything).Return([]stream.Record{bad0Again, bad1}, nil).Once()
+		// A consumer that kept looping would poll a third time. Answered here
+		// only so that it fails on the call count below instead of panicking
+		// on an unregistered call.
+		reader.On("Poll", mock.Anything).Return(nil, stream.ErrReaderClosed).Maybe()
+		reader.On("Commit", mock.Anything, []stream.Record{good1}).Return(nil).Once()
+		reader.On("Close").Return(nil).Once()
+
+		handler := &handlerMock{}
+		handler.On("Handle", mock.Anything, "good").Return(nil)
+		handler.On("Handle", mock.Anything, "bad").Return(errors.New("permanent"))
+
+		dlt := &dispatcherMock{}
+		dlt.On("Dispatch", mock.Anything, "orders-dlt", "key", mock.Anything).
+			Return(errors.New("broker down"))
+
+		c, err := consumer.New[string](reader, dlt, handler)
+		assert.Nil(t, err)
+
+		assert.ErrorIs(t, c.Run(context.Background()), consumer.ErrDeadLetterUnavailable)
+
+		// Two polls and no third: a consumer that kept looping would poll
+		// again, and there is no expectation left to answer it.
+		reader.AssertNumberOfCalls(t, "Poll", 2)
+		reader.AssertExpectations(t)
+
+		// bad0 and good1 in the first batch, bad1 in the second. bad0Again is
+		// dropped unprocessed, its partition already being halted.
+		handler.AssertNumberOfCalls(t, "Handle", 3)
 	})
 }
 
@@ -325,7 +381,6 @@ func TestRun_HaltStopsAtFirstUnresolvedRecordInPartition(t *testing.T) {
 
 		reader := &readerMock{}
 		reader.On("Poll", mock.Anything).Return([]stream.Record{bad, good}, nil).Once()
-		reader.On("Poll", mock.Anything).Return(nil, stream.ErrReaderClosed)
 		reader.On("Close").Return(nil).Once()
 
 		handler := &handlerMock{}
@@ -347,7 +402,8 @@ func TestRun_HaltStopsAtFirstUnresolvedRecordInPartition(t *testing.T) {
 		c, err := consumer.New[string](reader, dlt, handler)
 		assert.Nil(t, err)
 
-		assert.Nil(t, c.Run(context.Background()))
+		// The batch's only partition halted, so the run ends there.
+		assert.ErrorIs(t, c.Run(context.Background()), consumer.ErrDeadLetterUnavailable)
 
 		// A correct implementation never calls Handle for good and never
 		// commits anything in this batch - the partition halted on its first

@@ -30,5 +30,10 @@ var (
 	// next process redelivers it - but the partition does not recover on its
 	// own when the dead letter topic comes back, because a running consumer
 	// cannot tell that it has. Other partitions keep going.
+	//
+	// Run returns this error once there are no others left: with every
+	// partition halted the loop would poll, drop and commit nothing, forever.
+	// Restarting is the recovery path, and it redelivers everything the halted
+	// partitions never committed.
 	ErrDeadLetterUnavailable = errors.New("consumer: dead letter topic unavailable")
 )
