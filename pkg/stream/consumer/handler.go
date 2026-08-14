@@ -16,6 +16,10 @@ import (
 // trace continued from the producer. The context is cancelled when the
 // consumer shuts down, so a long handler should honour it.
 //
+// Handle is called concurrently - one goroutine per partition in the batch
+// being processed, serial within each - so a handler holding state must be
+// safe for concurrent use.
+//
 // Returning nil marks the record processed and allows its offset to be
 // committed.
 type Handler[T any] interface {
@@ -28,6 +32,9 @@ type Handler[T any] interface {
 // else goes straight to the dead letter topic. The remaining fields configure
 // the exponential backoff, and a retry sequence that exceeds MaxElapsedTime is
 // abandoned to the dead letter topic as well.
+//
+// A zero MaxElapsedTime is not "no limit": the backoff applies its own default
+// of 15 minutes. Set it explicitly - see WithMaxElapsedTime.
 //
 // The zero value retries nothing. Build one with NewConfigRetry or as a
 // literal.
@@ -58,7 +65,11 @@ func WithRetryableErrors(errs ...error) ConfigRetryOption {
 	}
 }
 
-// WithInitialInterval sets the delay before the first retry.
+// WithInitialInterval sets the first interval of the backoff, from which the
+// delays grow exponentially.
+//
+// It is not a delay before the first retry: the backoff waits between attempts,
+// so the first retry follows the failure immediately.
 func WithInitialInterval(initialInterval time.Duration) ConfigRetryOption {
 	return func(retrySettings configRetrySettings) configRetrySettings {
 		retrySettings.initialInterval = initialInterval
@@ -71,7 +82,10 @@ func WithInitialInterval(initialInterval time.Duration) ConfigRetryOption {
 // sent to the dead letter topic.
 //
 // The consumer does not poll while retrying, so a value beyond the broker
-// session timeout gets the consumer evicted from its group.
+// session timeout gets the consumer evicted from its group. Leaving it unset
+// does not avoid that: the backoff then falls back to its own default of 15
+// minutes, which is beyond any session timeout. A policy that retries anything
+// should say how long for.
 func WithMaxElapsedTime(maxElapsedTime time.Duration) ConfigRetryOption {
 	return func(retrySettings configRetrySettings) configRetrySettings {
 		retrySettings.maxElapsedTime = maxElapsedTime
