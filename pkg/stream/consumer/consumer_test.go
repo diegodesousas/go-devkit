@@ -9,6 +9,7 @@ import (
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
 	"github.com/diegodesousas/go-devkit/pkg/stream"
 	"github.com/diegodesousas/go-devkit/pkg/stream/consumer"
+	"github.com/diegodesousas/go-devkit/pkg/stream/dispatcher"
 	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -24,6 +25,57 @@ func jsonRecord(topic string, partition int32, offset int64, value string) strea
 		Headers: []stream.Header{
 			{Key: stream.ContentTypeHeaderKey, Value: []byte("json")},
 		},
+	}
+}
+
+// The constructor validates; the options do not. A missing dependency has to
+// fail here, because every one of them is only reached once a record is being
+// resolved - a nil dispatcher, in particular, would panic inside the dead
+// letter path, at the exact moment something else has already gone wrong.
+func TestNew_Validation(t *testing.T) {
+	tests := []struct {
+		name    string
+		reader  stream.Reader
+		dlt     dispatcher.Dispatcher
+		handler consumer.Handler[string]
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name:    "no reader",
+			reader:  nil,
+			dlt:     &dispatcherMock{},
+			handler: &handlerMock{},
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.ErrorIs(t, err, consumer.ErrNoReader)
+			},
+		},
+		{
+			name:    "no dead letter dispatcher",
+			reader:  &readerMock{},
+			dlt:     nil,
+			handler: &handlerMock{},
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.ErrorIs(t, err, consumer.ErrNoDeadLetterDispatcher)
+			},
+		},
+		{
+			name:    "no handler",
+			reader:  &readerMock{},
+			dlt:     &dispatcherMock{},
+			handler: nil,
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.ErrorIs(t, err, consumer.ErrNoHandler)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, err := consumer.New(tt.reader, tt.dlt, tt.handler)
+
+			assert.Nil(t, c)
+			tt.wantErr(t, err)
+		})
 	}
 }
 

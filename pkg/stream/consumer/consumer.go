@@ -44,6 +44,10 @@ type defaultConsumer[T any] struct {
 // the dead letter topic, and is therefore required even when the handler never
 // fails.
 //
+// All three are required: New returns ErrNoReader, ErrNoDeadLetterDispatcher
+// or ErrNoHandler rather than let a nil surface later, when it would land in
+// the middle of resolving a record and take the partition down with it.
+//
 // New starts nothing. Call Run, once: a Consumer drives a single loop and is
 // not meant to be shared between goroutines.
 func New[T any](
@@ -52,6 +56,18 @@ func New[T any](
 	handler Handler[T],
 	opts ...Option[T],
 ) (Consumer, error) {
+	if reader == nil {
+		return nil, ErrNoReader
+	}
+
+	if dlt == nil {
+		return nil, ErrNoDeadLetterDispatcher
+	}
+
+	if handler == nil {
+		return nil, ErrNoHandler
+	}
+
 	s := settings[T]{
 		logger:          log.New(),
 		stringGenerator: gen.UUIDGenerator(),

@@ -2,6 +2,24 @@ package consumer
 
 import "github.com/pkg/errors"
 
+// Errors returned when a Consumer cannot be built.
+var (
+	// ErrNoReader means New was called without a stream.Reader. There is
+	// nothing to consume from and no default worth guessing.
+	ErrNoReader = errors.New("consumer: a reader is required")
+
+	// ErrNoDeadLetterDispatcher means New was called without a dispatcher for
+	// the dead letter topic. It is required even for a handler that never
+	// fails: an undecodable payload takes the same route, and finding out at
+	// that point would mean a nil panic in the middle of resolving a record.
+	ErrNoDeadLetterDispatcher = errors.New("consumer: a dead letter dispatcher is required")
+
+	// ErrNoHandler means New was called without a Handler. There is no default
+	// behaviour for a record - dropping or dead-lettering everything would
+	// both be wrong.
+	ErrNoHandler = errors.New("consumer: a handler is required")
+)
+
 var (
 	// ErrDeadLetterUnavailable means a record could not be processed and could
 	// not be published to the dead letter topic either.
