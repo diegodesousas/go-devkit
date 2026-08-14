@@ -1,6 +1,8 @@
 package consumer
 
 import (
+	"time"
+
 	"github.com/diegodesousas/go-devkit/pkg/gen"
 	"github.com/diegodesousas/go-devkit/pkg/log"
 )
@@ -8,6 +10,16 @@ import (
 // deadLetterSuffix is appended to the source topic when no dead letter topic
 // is configured.
 const deadLetterSuffix = "dlt"
+
+const (
+	// deadLetterMaxTries bounds how often a dead letter publication is retried
+	// before the partition halts.
+	deadLetterMaxTries = 3
+
+	// defaultCommitTimeout bounds the commit issued after a batch, including
+	// the one issued during shutdown.
+	defaultCommitTimeout = 10 * time.Second
+)
 
 type settings[T any] struct {
 	logger          log.Logger
