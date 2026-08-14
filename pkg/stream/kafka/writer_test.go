@@ -64,4 +64,7 @@ func TestWriter_Produce_DeliveryTimeout(t *testing.T) {
 	})
 
 	assert.ErrorIs(t, err, stream.ErrProcessMessageTimedOut)
+	// The driver's own message is what says why the broker went away, so it
+	// has to survive the mapping onto the sentinel.
+	assert.Contains(t, err.Error(), "records have timed out")
 }

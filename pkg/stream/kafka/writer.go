@@ -14,9 +14,13 @@ type writer struct {
 
 // NewWriter builds a Kafka producer.
 //
-// The producer is configured for ordering and durability over throughput: it
-// waits for all in-sync replicas and keeps a single request in flight per
-// broker, so a retry cannot reorder records within a partition.
+// The producer is configured for durability over throughput: it waits for all
+// in-sync replicas, which is also what the driver requires before it will keep
+// its idempotent producer enabled.
+//
+// Ordering within a partition comes from that idempotent producer - each batch
+// carries a sequence number, so a retried batch cannot land behind a later one
+// - and not from capping in-flight requests, which the driver sizes itself.
 func NewWriter(opts ...Option) (stream.Writer, error) {
 	s := defaultSettings()
 	for _, opt := range opts {
@@ -30,7 +34,6 @@ func NewWriter(opts ...Option) (stream.Writer, error) {
 
 	clientOpts = append(clientOpts,
 		kgo.RequiredAcks(kgo.AllISRAcks()),
-		kgo.MaxProduceRequestsInflightPerBroker(1),
 		kgo.RecordDeliveryTimeout(s.produceTimeout),
 	)
 
@@ -46,13 +49,19 @@ func NewWriter(opts ...Option) (stream.Writer, error) {
 //
 // A delivery timeout is reported as stream.ErrProcessMessageTimedOut, so
 // callers can keep separating an unreachable or overloaded broker from a
-// record the broker actively rejected.
+// record the broker actively rejected. The driver's own message is kept in the
+// wrapped text, because it is often the only clue as to why the broker went
+// away.
+//
+// Neither that timeout nor cancelling ctx aborts a record already in flight:
+// the idempotent producer waits for its outcome rather than leave a hole in
+// the sequence numbers. See WithProduceTimeout.
 func (w *writer) Produce(ctx context.Context, record stream.Record) error {
 	results := w.client.ProduceSync(ctx, toKgoRecord(record))
 
 	if err := results.FirstErr(); err != nil {
 		if errors.Is(err, kgo.ErrRecordTimeout) {
-			return errors.Wrap(stream.ErrProcessMessageTimedOut, "kafka: producing record")
+			return errors.Wrapf(stream.ErrProcessMessageTimedOut, "kafka: producing record: %v", err)
 		}
 
 		return errors.Wrap(err, "kafka: producing record")

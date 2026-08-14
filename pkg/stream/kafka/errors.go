@@ -14,4 +14,8 @@ var (
 
 	// ErrNoGroupID means NewReader was called with an empty group id.
 	ErrNoGroupID = errors.New("kafka: a consumer group id is required")
+
+	// ErrUnknownSCRAMMechanism means WithSASLSCRAM was called with a
+	// SCRAMMechanism that is not one of the constants declared by this package.
+	ErrUnknownSCRAMMechanism = errors.New("kafka: unknown SCRAM mechanism")
 )

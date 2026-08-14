@@ -45,10 +45,6 @@ const (
 	SCRAMSHA512
 )
 
-// ErrUnknownSCRAMMechanism is returned when a SCRAMMechanism is not one of the
-// constants declared by this package.
-var ErrUnknownSCRAMMechanism = errors.New("kafka: unknown SCRAM mechanism")
-
 type settings struct {
 	brokers        []string
 	clientID       string
@@ -70,9 +66,17 @@ func defaultSettings() settings {
 
 // Option configures a Reader or a Writer. The same options serve both, so
 // broker, authentication and TLS settings are written once for an application.
+//
+// Options never validate; an invalid one records the failure and the
+// constructor reports it. That record is sticky: once WithSASLSCRAM is given
+// an unknown mechanism, the constructor fails even if a later option installs
+// a valid mechanism. Failing loudly is deliberate - a misconfigured client
+// that silently authenticates some other way is worse.
 type Option func(s settings) settings
 
-// WithBrokers sets the seed brokers, as "host:port" strings.
+// WithBrokers adds seed brokers, as "host:port" strings. Repeated calls
+// accumulate instead of replacing, so brokers can be split across several
+// options.
 func WithBrokers(brokers ...string) Option {
 	return func(s settings) settings {
 		s.brokers = append(s.brokers, brokers...)
@@ -158,8 +162,19 @@ func WithStartOffset(o StartOffset) Option {
 // WithProduceTimeout sets how long a produced record may go unacknowledged
 // before Produce reports a failure. Defaults to 30s.
 //
-// The driver rejects any non-zero timeout shorter than one second, so
-// NewWriter returns an error rather than silently rounding it up.
+// The timeout is best-effort, not the hard expiry that librdkafka's
+// message.timeout.ms gave. The producer is idempotent, and the driver only
+// enforces the timeout where doing so cannot leave a hole in the sequence
+// numbers: on a record that was never written into a request, or on one that
+// was written and answered. A request that reached a broker which then went
+// silent is not time-bounded, so Produce can block well past this value.
+// kgo.AllowIdempotentProduceCancellation makes the bound hard, at the cost of
+// duplicates on any record the application re-produces after a cancellation;
+// this package does not enable it, because that trade belongs to the caller.
+//
+// Two values surprise. Zero means unlimited - a record then waits forever
+// instead of for the default 30s. Any other value below one second is rejected
+// by the driver, so NewWriter returns an error rather than rounding it up.
 func WithProduceTimeout(d time.Duration) Option {
 	return func(s settings) settings {
 		s.produceTimeout = d
