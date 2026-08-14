@@ -5,8 +5,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/confluentinc/confluent-kafka-go/kafka"
-
 	"github.com/diegodesousas/go-devkit/pkg/stream"
 	"github.com/stretchr/testify/assert"
 )
@@ -210,91 +208,75 @@ func TestJSONMessage_NewWithData_Success(t *testing.T) {
 }
 
 func TestNewMessageType(t *testing.T) {
-	type args struct {
-		kafkaMessage *kafka.Message
-	}
-
-	type expectations struct {
-		message stream.Message
-		err     error
-	}
-
 	tests := []struct {
-		name         string
-		args         args
-		expectations expectations
+		name     string
+		record   stream.Record
+		wantType string
+		wantErr  assert.ErrorAssertionFunc
 	}{
 		{
-			name: "Text Message Success",
-			args: args{
-				kafkaMessage: &kafka.Message{
-					Headers: []kafka.Header{
-						{
-							Key:   "DEVKIT_CONTENT_TYPE",
-							Value: []byte("text"),
-						},
-					},
-				},
+			name: "json content type",
+			record: stream.Record{
+				Value:   []byte(`{"id":"1"}`),
+				Headers: []stream.Header{{Key: stream.ContentTypeHeaderKey, Value: []byte("json")}},
 			},
-			expectations: expectations{
-				message: stream.NewTextMessage(""),
-				err:     nil,
+			wantType: "json",
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.Nil(t, err)
 			},
 		},
 		{
-			name: "Json Message Success",
-			args: args{
-				kafkaMessage: &kafka.Message{
-					Headers: []kafka.Header{
-						{
-							Key:   "DEVKIT_CONTENT_TYPE",
-							Value: []byte("json"),
-						},
-					},
-				},
+			name: "postgresql content type decodes as json",
+			record: stream.Record{
+				Value:   []byte(`{"id":"1"}`),
+				Headers: []stream.Header{{Key: stream.ContentTypeHeaderKey, Value: []byte("postgresql")}},
 			},
-			expectations: expectations{
-				message: stream.NewJSONMessage(nil),
-				err:     nil,
+			wantType: "json",
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.Nil(t, err)
 			},
 		},
 		{
-			name: "Unknown Type Error",
-			args: args{
-				kafkaMessage: &kafka.Message{
-					Headers: []kafka.Header{
-						{
-							Key:   "DEVKIT_CONTENT_TYPE",
-							Value: []byte("unknown"),
-						},
-					},
-				},
+			name: "text content type",
+			record: stream.Record{
+				Value:   []byte("plain"),
+				Headers: []stream.Header{{Key: stream.ContentTypeHeaderKey, Value: []byte("text")}},
 			},
-			expectations: expectations{
-				message: nil,
-				err:     stream.ErrUnknownMessageType,
+			wantType: "text",
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.Nil(t, err)
 			},
 		},
 		{
-			name: "Header Without Type Key Error",
-			args: args{
-				kafkaMessage: &kafka.Message{
-					Headers: []kafka.Header{},
-				},
+			name:   "no headers at all",
+			record: stream.Record{Value: []byte("plain")},
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.ErrorIs(t, err, stream.ErrUnknownMessageType)
 			},
-			expectations: expectations{
-				message: nil,
-				err:     stream.ErrUnknownMessageType,
+		},
+		{
+			name: "unrecognised content type",
+			record: stream.Record{
+				Value:   []byte("plain"),
+				Headers: []stream.Header{{Key: stream.ContentTypeHeaderKey, Value: []byte("avro")}},
+			},
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.ErrorIs(t, err, stream.ErrUnknownMessageType)
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			message, err := stream.NewMessageType(tt.args.kafkaMessage)
+			message, err := stream.NewMessageType(tt.record)
 
-			assert.Equal(t, tt.expectations.err, err)
-			assert.IsType(t, tt.expectations.message, message)
+			if !tt.wantErr(t, err) {
+				return
+			}
+
+			if err == nil {
+				assert.Equal(t, tt.wantType, message.Type())
+			}
 		})
 	}
 }
