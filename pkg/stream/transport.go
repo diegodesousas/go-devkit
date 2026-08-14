@@ -7,7 +7,10 @@ import "context"
 // Poll returns a batch because that is what the underlying clients deliver, and
 // because a batch is what lets a consumer process partitions concurrently.
 // An empty slice with a nil error means the poll timed out with nothing
-// available, which is normal and not a failure.
+// available, which is normal and not a failure. Records may also come back
+// alongside a non-nil error: a batch spans partitions and one of them can fail
+// while the rest deliver. A caller is free to drop those records - they are
+// uncommitted, so the next process gets them again.
 //
 // Commit acknowledges the given records. Implementations pick, per partition,
 // the record with the highest LeaderEpoch and, within that epoch, the highest
