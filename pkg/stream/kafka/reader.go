@@ -3,6 +3,7 @@ package kafka
 import (
 	"context"
 
+	"github.com/diegodesousas/go-devkit/pkg/log"
 	"github.com/diegodesousas/go-devkit/pkg/stream"
 	"github.com/pkg/errors"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -74,8 +75,8 @@ func NewReader(groupID string, topics []string, opts ...Option) (stream.Reader, 
 	return &reader{client: client}, nil
 }
 
-// Poll waits for records. A cancelled context yields that context's error
-// rather than a partial batch.
+// Poll waits for records. A cancelled context or a closed reader yields that
+// error and no records: both mean the loop is over.
 //
 // It opens by releasing the rebalance the previous batch was holding off, so a
 // revocation lands between two batches and never between a record being polled
@@ -83,6 +84,13 @@ func NewReader(groupID string, topics []string, opts ...Option) (stream.Reader, 
 // anything before it runs while the group is still blocked, and franz-go gives
 // rebalances priority once released, so the release must happen before the poll
 // that would otherwise queue behind it.
+//
+// Anything else the driver reports belongs to one partition, and the same fetch
+// still carries whatever every other partition delivered. Franz-go injects some
+// of those errors purely to inform - a data loss reset it has already recovered
+// from, a group session it has already lost - so Poll logs them and hands the
+// batch over. Only an error it cannot describe that way ends the poll, and even
+// then the records that did arrive come back with it.
 func (r *reader) Poll(ctx context.Context) ([]stream.Record, error) {
 	r.client.AllowRebalance()
 
@@ -96,10 +104,6 @@ func (r *reader) Poll(ctx context.Context) ([]stream.Record, error) {
 		return nil, errors.WithStack(stream.ErrReaderClosed)
 	}
 
-	if err := fetches.Err(); err != nil {
-		return nil, errors.Wrap(err, "kafka: polling records")
-	}
-
 	kgoRecords := fetches.Records()
 
 	records := make([]stream.Record, 0, len(kgoRecords))
@@ -107,7 +111,56 @@ func (r *reader) Poll(ctx context.Context) ([]stream.Record, error) {
 		records = append(records, fromKgoRecord(kgoRecord))
 	}
 
-	return records, nil
+	return records, reportFetchErrors(ctx, fetches)
+}
+
+// reportFetchErrors logs every per-partition error franz-go injected into a
+// fetch and returns the first one that is worth ending the poll for.
+//
+// The informational ones are not failures at all: ErrDataLoss says the client
+// noticed a gap and has already reset itself, and ErrGroupSession says it lost
+// the group session and will rejoin. Returning either would kill a consumer
+// loop over something the driver has in hand - and, because a fetch reports
+// errors per partition, would also throw away the records the healthy
+// partitions delivered in the very same batch.
+func reportFetchErrors(ctx context.Context, fetches kgo.Fetches) error {
+	var fatal error
+
+	for _, fetchErr := range fetches.Errors() {
+		logger := log.FromContext(ctx).WithFields(
+			log.NewField("consumer-topic", fetchErr.Topic),
+			log.NewField("message-partition", fetchErr.Partition),
+		)
+		errCtx := log.WithLogger(ctx, logger)
+
+		var dataLoss *kgo.ErrDataLoss
+		var groupSession *kgo.ErrGroupSession
+
+		switch {
+		case errors.As(fetchErr.Err, &dataLoss):
+			log.Error(errCtx, errors.Wrap(fetchErr.Err, "kafka: consuming reset after data loss"), log.WarningTypeCritical)
+		case errors.As(fetchErr.Err, &groupSession):
+			log.Warn(errCtx, "kafka: group session lost, rejoining: "+fetchErr.Err.Error())
+		case errors.Is(fetchErr.Err, context.Canceled), errors.Is(fetchErr.Err, context.DeadlineExceeded):
+			// The caller's own context, injected per partition. Poll answered
+			// for it above; here it would only be noise.
+		default:
+			wrapped := errors.Wrapf(fetchErr.Err, "kafka: polling %s/%d", fetchErr.Topic, fetchErr.Partition)
+
+			if fatal == nil {
+				// The one Poll returns. Logging it here as well would only
+				// double whatever the caller does with it.
+				fatal = wrapped
+
+				continue
+			}
+
+			// Every fetch error after the first would be lost otherwise.
+			log.Error(errCtx, wrapped)
+		}
+	}
+
+	return fatal
 }
 
 // Commit acknowledges records. franz-go keeps, per partition, the highest

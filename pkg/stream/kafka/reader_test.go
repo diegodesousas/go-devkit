@@ -1,10 +1,12 @@
 package kafka
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/diegodesousas/go-devkit/pkg/stream"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
@@ -110,4 +112,107 @@ func TestNewReader_Validation(t *testing.T) {
 			tt.wantErr(t, err)
 		})
 	}
+}
+
+// fetchWithError builds a fetch carrying one partition error, which is the
+// shape franz-go injects its informational errors in.
+func fetchWithError(topic string, partition int32, err error) kgo.Fetches {
+	return kgo.Fetches{
+		{
+			Topics: []kgo.FetchTopic{
+				{
+					Topic: topic,
+					Partitions: []kgo.FetchPartition{
+						{Partition: partition, Err: err},
+					},
+				},
+			},
+		},
+	}
+}
+
+// Not every error franz-go puts in a fetch is a reason to stop consuming. It
+// injects some of them purely to inform - the client has already recovered by
+// the time the caller sees them - and returning those from Poll kills a healthy
+// consumer loop. ErrDataLoss is the one that matters most here: an epoch the
+// broker has moved past makes franz-go reset the cursor and report it, so
+// treating it as fatal turns a rewind into a rewind plus a crash.
+func TestReportFetchErrors(t *testing.T) {
+	fatalErr := errors.New("broker unreachable")
+
+	tests := []struct {
+		name    string
+		fetches kgo.Fetches
+		wantErr assert.ErrorAssertionFunc
+	}{
+		{
+			name:    "no errors at all",
+			fetches: kgo.Fetches{},
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.Nil(t, err)
+			},
+		},
+		{
+			name:    "data loss is informational",
+			fetches: fetchWithError("orders", 0, &kgo.ErrDataLoss{Topic: "orders", Partition: 0, ConsumedTo: 10, ResetTo: 4}),
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.Nil(t, err)
+			},
+		},
+		{
+			name:    "a lost group session is informational",
+			fetches: fetchWithError("orders", 0, &kgo.ErrGroupSession{Err: fatalErr}),
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.Nil(t, err)
+			},
+		},
+		{
+			name:    "a cancelled context is answered by Poll itself",
+			fetches: fetchWithError("orders", 0, context.Canceled),
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.Nil(t, err)
+			},
+		},
+		{
+			name:    "anything else ends the poll",
+			fetches: fetchWithError("orders", 3, fatalErr),
+			wantErr: func(t assert.TestingT, err error, i ...any) bool {
+				return assert.ErrorIs(t, err, fatalErr) &&
+					assert.Contains(t, err.Error(), "orders/3")
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.wantErr(t, reportFetchErrors(context.Background(), tt.fetches))
+		})
+	}
+}
+
+// One bad partition must not cost the caller the records every other partition
+// delivered in the same fetch: fetches.Err() reports the first error across all
+// of them, and discarding the batch on it drops good records that would then be
+// redelivered - or, if the error keeps coming back, never processed at all.
+func TestReportFetchErrors_KeepsScanningPastAnInformationalOne(t *testing.T) {
+	expectedErr := errors.New("not authorized")
+
+	fetches := kgo.Fetches{
+		{
+			Topics: []kgo.FetchTopic{
+				{
+					Topic: "orders",
+					Partitions: []kgo.FetchPartition{
+						{Partition: 0, Err: &kgo.ErrDataLoss{Topic: "orders", Partition: 0}},
+						{Partition: 1, Err: expectedErr},
+					},
+				},
+			},
+		},
+	}
+
+	err := reportFetchErrors(context.Background(), fetches)
+
+	assert.ErrorIs(t, err, expectedErr)
+	assert.Contains(t, err.Error(), "orders/1")
 }
