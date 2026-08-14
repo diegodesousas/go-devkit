@@ -16,6 +16,13 @@ type key string
 
 const txKey key = "tx"
 
+// Config describes how to reach a PostgreSQL server and how to size the pool.
+//
+// The zero value of the pool fields means the database/sql defaults:
+// unlimited open connections, and no maximum idle time or lifetime.
+//
+// Password is redacted by String, so log the Config itself rather than any
+// string built from its fields.
 type Config struct {
 	Host            string
 	Port            string
@@ -61,6 +68,9 @@ type dbConn struct {
 	db *sqlx.DB
 }
 
+// New opens a connection pool and verifies it with a ping.
+//
+// It returns an error wrapping ErrConn when the server cannot be reached.
 func New(cfg Config) (Connection, error) {
 	db, err := sqlx.Connect("pgx", cfg.dsn())
 	if err != nil {

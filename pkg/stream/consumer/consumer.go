@@ -22,8 +22,11 @@ const (
 	loggerTraceKey   = "trace-id"
 )
 
+// Shutdown stops the consumer: it waits for the message being processed, then
+// closes the Kafka client.
 type Shutdown func()
 
+// Consumer is a running Kafka consumer loop.
 type Consumer interface {
 	Run() (Shutdown, error)
 	ListenShutdown() <-chan error
@@ -42,6 +45,14 @@ type defaultConsumer[T any] struct {
 	topic            string
 }
 
+// New builds a Consumer for messages decoded into T.
+//
+// It creates a Kafka client through factory using the handler ID as the group,
+// so it fails if the broker is unreachable. dispatcher is used to publish to the
+// dead letter topic, and is therefore required even for a consumer that never
+// fails.
+//
+// New does not start anything - call Run.
 func New[T any](
 	dispatcher dispatcher.Dispatcher,
 	factory Factory,

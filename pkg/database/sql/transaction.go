@@ -52,6 +52,11 @@ func (t *tx) Rollback() error {
 	return nil
 }
 
+// WithTransaction returns a context carrying transaction, so that later calls
+// to Get, Select and Exec on a Connection run inside it.
+//
+// TransactionContext does this for you. Call it directly only when managing a
+// transaction by hand.
 func WithTransaction(ctx context.Context, transaction Transaction) context.Context {
 	return context.WithValue(ctx, txKey, transaction)
 }

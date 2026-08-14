@@ -14,6 +14,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// Route binds a handler to a method and path, with optional per-route
+// middlewares.
+//
+// Build one with NewGet, NewPost, NewPut or NewDelete. Timeout is honoured by
+// the server but is not set by those constructors, so a route that needs one
+// has to be built as a literal.
 type Route struct {
 	Path        string
 	Method      string
@@ -31,24 +37,33 @@ func newRoute(method, path string, handler Handler, middlewares ...Middleware) R
 	}
 }
 
+// NewGet builds a GET route.
 func NewGet(path string, handler Handler, middlewares ...Middleware) Route {
 	return newRoute(http.MethodGet, path, handler, middlewares...)
 }
 
+// NewPost builds a POST route.
 func NewPost(path string, handler Handler, middlewares ...Middleware) Route {
 	return newRoute(http.MethodPost, path, handler, middlewares...)
 }
 
+// NewPut builds a PUT route.
 func NewPut(path string, handler Handler, middlewares ...Middleware) Route {
 	return newRoute(http.MethodPut, path, handler, middlewares...)
 }
 
+// NewDelete builds a DELETE route.
 func NewDelete(path string, handler Handler, middlewares ...Middleware) Route {
 	return newRoute(http.MethodDelete, path, handler, middlewares...)
 }
 
+// Shutdown stops the server, waiting for in-flight requests until ctx is done.
 type Shutdown func(ctx context.Context) error
 
+// Server is the assembled HTTP server.
+//
+// It also implements http.Handler, which is what makes it usable with
+// httptest.NewServer in tests.
 type Server interface {
 	Run() Shutdown
 	ShutdownListener() chan error
@@ -64,6 +79,11 @@ type server struct {
 	errorHandler     ErrorHandler
 }
 
+// New assembles a Server from the given options.
+//
+// It builds the router, installs the global middlewares in the order supplied
+// and wraps every route in request logging and metrics. It does not bind the
+// port - Run does.
 func New(configs ...Option) Server {
 	s := defaultSettings
 
@@ -149,8 +169,12 @@ func (s *server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	s.Handler.ServeHTTP(w, req)
 }
 
+// Handler is an http.HandlerFunc that may return an error instead of writing
+// the failure response itself. A non-nil return is passed to the ErrorHandler.
 type Handler func(w http.ResponseWriter, req *http.Request) error
 
+// ErrorHandler turns an error returned by a Handler into a response. Install
+// one with WithErrorHandler; the default writes 500 and logs nothing.
 type ErrorHandler func(ctx context.Context, w http.ResponseWriter, err error)
 
 func newErrorHandler(errorHandler ErrorHandler, handler Handler) http.Handler {
@@ -166,8 +190,11 @@ func defaultHandleError(ctx context.Context, w http.ResponseWriter, err error) {
 	w.WriteHeader(http.StatusInternalServerError)
 }
 
+// Middleware wraps an http.Handler.
 type Middleware func(handler http.Handler) http.Handler
 
+// Middlewares wraps main in the given middlewares so that the first one listed
+// is the outermost, and therefore runs first.
 func Middlewares(main http.Handler, middlewares ...Middleware) http.Handler {
 	handler := main
 	for i := range middlewares {
@@ -177,10 +204,19 @@ func Middlewares(main http.Handler, middlewares ...Middleware) http.Handler {
 	return handler
 }
 
+// GetParam reads a path parameter, such as the "id" in "/orders/{id}".
+//
+// It reads from the chi route context, which only exists once the router has
+// matched the request. In a test that calls a handler directly, populate it
+// with httpservertest.SetURLParam.
 func GetParam(r *http.Request, key string) string {
 	return chi.URLParam(r, key)
 }
 
+// NewLogRequest wraps main so each request emits a log entry with its duration
+// plus the request-rate and response-time metrics, tagged with method, route and
+// status. The server applies it to every route; call it directly only when
+// composing a handler by hand.
 func NewLogRequest(route, method string, main http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
