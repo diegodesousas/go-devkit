@@ -9,9 +9,12 @@ import "context"
 // An empty slice with a nil error means the poll timed out with nothing
 // available, which is normal and not a failure.
 //
-// Commit acknowledges the given records. Implementations commit the highest
-// offset per partition among them, so passing every processed record is
-// correct and passing only the last one per partition is an optimisation.
+// Commit acknowledges the given records. Implementations pick, per partition,
+// the record with the highest LeaderEpoch and, within that epoch, the highest
+// Offset - so passing every processed record is correct and passing only the
+// last one per partition is an optimisation. Records must be handed back as the
+// Reader produced them: a rebuilt Record loses its LeaderEpoch, and a driver
+// that reads that field can take the loss for a stale commit and rewind.
 //
 // Offsets are never committed automatically: the caller decides when a record
 // counts as processed.

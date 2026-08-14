@@ -16,12 +16,22 @@ type Header struct {
 // driver out of the public API: swapping the client library changes how a
 // Record is built, not what callers see.
 //
-// When producing, Partition, Offset and Timestamp are left unset - the broker
-// and the driver assign them.
+// When producing, Partition, Offset, LeaderEpoch and Timestamp are left unset -
+// the broker and the driver assign them.
 type Record struct {
 	Topic     string
 	Partition int32
 	Offset    int64
+
+	// LeaderEpoch is an opaque value the driver stamps on a Record it read,
+	// and that Reader.Commit hands back to it untouched. It carries no meaning
+	// for callers and must not be invented: a driver uses it to tell whether
+	// the partition changed hands between the read and the commit, and a value
+	// it did not issue can make it decide the committed offset is stale and
+	// rewind. Pass back the Record the Reader gave you, and leave the field
+	// alone when producing.
+	LeaderEpoch int32
+
 	Key       []byte
 	Value     []byte
 	Headers   []Header

@@ -91,23 +91,23 @@ func (r *reader) Poll(ctx context.Context) ([]stream.Record, error) {
 	return records, nil
 }
 
-// Commit acknowledges records. franz-go commits the highest offset per
-// partition among them, so passing every processed record is correct.
+// Commit acknowledges records. franz-go keeps, per partition, the highest
+// leader epoch and the highest offset within it, so passing every processed
+// record is correct.
+//
+// The leader epoch travels back exactly as it arrived. Kafka checks it on the
+// next fetch (KIP-320): an epoch the partition has already moved past means the
+// commit belonged to a leader that has since been replaced, and the broker
+// answers with the offset that epoch ended at instead of the one committed.
+// Sending a fabricated epoch - 0, say, which is what a Record rebuilt by hand
+// carries - therefore rewinds the group to wherever the first leader election
+// happened, on every partition that ever had one.
 func (r *reader) Commit(ctx context.Context, records ...stream.Record) error {
 	if len(records) == 0 {
 		return nil
 	}
 
-	kgoRecords := make([]*kgo.Record, 0, len(records))
-	for _, record := range records {
-		kgoRecords = append(kgoRecords, &kgo.Record{
-			Topic:     record.Topic,
-			Partition: record.Partition,
-			Offset:    record.Offset,
-		})
-	}
-
-	if err := r.client.CommitRecords(ctx, kgoRecords...); err != nil {
+	if err := r.client.CommitRecords(ctx, toCommitRecords(records)...); err != nil {
 		return errors.Wrap(err, "kafka: committing records")
 	}
 
@@ -121,6 +121,22 @@ func (r *reader) Close() error {
 	return nil
 }
 
+// toCommitRecords reduces records to what a commit needs: the coordinates of
+// the offset and the leader epoch that produced it.
+func toCommitRecords(records []stream.Record) []*kgo.Record {
+	kgoRecords := make([]*kgo.Record, 0, len(records))
+	for _, record := range records {
+		kgoRecords = append(kgoRecords, &kgo.Record{
+			Topic:       record.Topic,
+			Partition:   record.Partition,
+			Offset:      record.Offset,
+			LeaderEpoch: record.LeaderEpoch,
+		})
+	}
+
+	return kgoRecords
+}
+
 func fromKgoRecord(kgoRecord *kgo.Record) stream.Record {
 	headers := make([]stream.Header, 0, len(kgoRecord.Headers))
 	for _, header := range kgoRecord.Headers {
@@ -128,12 +144,13 @@ func fromKgoRecord(kgoRecord *kgo.Record) stream.Record {
 	}
 
 	return stream.Record{
-		Topic:     kgoRecord.Topic,
-		Partition: kgoRecord.Partition,
-		Offset:    kgoRecord.Offset,
-		Key:       kgoRecord.Key,
-		Value:     kgoRecord.Value,
-		Headers:   headers,
-		Timestamp: kgoRecord.Timestamp,
+		Topic:       kgoRecord.Topic,
+		Partition:   kgoRecord.Partition,
+		Offset:      kgoRecord.Offset,
+		LeaderEpoch: kgoRecord.LeaderEpoch,
+		Key:         kgoRecord.Key,
+		Value:       kgoRecord.Value,
+		Headers:     headers,
+		Timestamp:   kgoRecord.Timestamp,
 	}
 }
