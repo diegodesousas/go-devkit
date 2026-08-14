@@ -2,46 +2,63 @@ package dispatcher
 
 import (
 	"context"
+	"time"
 
 	"github.com/DataDog/dd-trace-go/v2/ddtrace/tracer"
-	"github.com/confluentinc/confluent-kafka-go/kafka"
 	"github.com/diegodesousas/go-devkit/pkg/stream"
 	"github.com/pkg/errors"
 )
 
-const (
-	defaultFlushTimeoutMs int = 1000
-)
+const defaultFlushTimeout = 5 * time.Second
 
-// Dispatcher publishes messages to Kafka.
-//
-// Dispatch blocks until the broker confirms the message. Shutdown flushes and
-// closes the underlying producer and must be called before the process exits.
+// Dispatcher publishes messages to a topic.
 type Dispatcher interface {
-	Dispatch(ctx context.Context, topic string, key string, content stream.Message) error
-	Shutdown()
+	Dispatch(ctx context.Context, topic, key string, content stream.Message) error
+	Close(ctx context.Context) error
 }
 
-type dispatcher struct {
-	client         Client
-	flushTimeoutMs int
+type settings struct {
+	flushTimeout time.Duration
 }
 
-// New returns a Dispatcher publishing through client.
-func New(client Client) Dispatcher {
-	return &dispatcher{
-		client:         client,
-		flushTimeoutMs: defaultFlushTimeoutMs,
+// Option configures a Dispatcher.
+type Option func(s settings) settings
+
+// WithFlushTimeout caps how long Close waits for buffered records. Defaults to
+// 5s.
+func WithFlushTimeout(d time.Duration) Option {
+	return func(s settings) settings {
+		s.flushTimeout = d
+
+		return s
 	}
 }
 
-func (d dispatcher) Shutdown() {
-	d.client.Flush(d.flushTimeoutMs)
-	d.client.Close()
+type dispatcher struct {
+	writer       stream.Writer
+	flushTimeout time.Duration
 }
 
-func (d dispatcher) Dispatch(ctx context.Context, topic string, key string, content stream.Message) error {
-	span, _ := tracer.StartSpanFromContext(ctx, "stream.dispatcher")
+// New returns a Dispatcher publishing through w.
+func New(w stream.Writer, opts ...Option) Dispatcher {
+	s := settings{flushTimeout: defaultFlushTimeout}
+	for _, opt := range opts {
+		s = opt(s)
+	}
+
+	return &dispatcher{
+		writer:       w,
+		flushTimeout: s.flushTimeout,
+	}
+}
+
+// Dispatch serializes content and publishes it, blocking until the broker
+// acknowledges the record.
+//
+// The span context is injected into the record headers so the consumer can
+// continue the trace instead of starting a disconnected one.
+func (d *dispatcher) Dispatch(ctx context.Context, topic, key string, content stream.Message) error {
+	span, ctx := tracer.StartSpanFromContext(ctx, "stream.dispatcher")
 	defer span.Finish()
 
 	span.SetTag("topic", topic)
@@ -49,56 +66,50 @@ func (d dispatcher) Dispatch(ctx context.Context, topic string, key string, cont
 
 	payload, err := content.Serialize()
 	if err != nil {
-		return errors.Wrap(err, "dispatcher")
+		return errors.Wrap(err, "dispatcher: serializing message")
 	}
 
-	message := &kafka.Message{
-		TopicPartition: kafka.TopicPartition{
-			Topic:     &topic,
-			Partition: kafka.PartitionAny,
-		},
-		Value: payload,
-		Key:   []byte(key),
-		Headers: []kafka.Header{
-			{
-				Key:   stream.ContentTypeHeaderKey,
-				Value: []byte(content.Type()),
-			},
-		},
+	headers := []stream.Header{
+		{Key: stream.ContentTypeHeaderKey, Value: []byte(content.Type())},
 	}
 
-	deliveryChan := make(chan kafka.Event, 1)
-	defer close(deliveryChan)
-
-	if err := d.client.Produce(message, deliveryChan); err != nil {
-		return errors.Wrap(err, "dispatcher")
+	carrier := stream.HeaderCarrier{}
+	if err := tracer.Inject(span.Context(), carrier); err == nil {
+		headers = append(headers, carrier.Headers()...)
 	}
 
-	e := <-deliveryChan
-
-	switch ev := e.(type) {
-	case *kafka.Message:
-		if ev.TopicPartition.Error == nil {
-			return nil
-		}
-
-		return d.handleTopicPartitionError(ev.TopicPartition.Error)
-
-	case *kafka.Error:
-		return errors.Wrap(ev, "dispatcher kafka error")
-
-	default:
-		return errors.Errorf("dispatcher unexpected error: %s", ev)
+	record := stream.Record{
+		Topic:   topic,
+		Key:     []byte(key),
+		Value:   payload,
+		Headers: headers,
 	}
+
+	if err := d.writer.Produce(ctx, record); err != nil {
+		return errors.Wrap(err, "dispatcher: producing record")
+	}
+
+	return nil
 }
 
-func (d dispatcher) handleTopicPartitionError(err error) error {
-	wrapMessage := "dispatcher delivery error"
+// Close flushes buffered records and releases the writer.
+//
+// It reports a failed flush instead of discarding it: records still buffered
+// when the process exits are lost, and that must not be silent.
+func (d *dispatcher) Close(ctx context.Context) error {
+	flushCtx, cancel := context.WithTimeout(ctx, d.flushTimeout)
+	defer cancel()
 
-	var kafkaErr kafka.Error
-	if errors.As(err, &kafkaErr) && kafkaErr.Code() == kafka.ErrMsgTimedOut {
-		return errors.Wrap(stream.ErrProcessMessageTimedOut, wrapMessage)
+	flushErr := d.writer.Flush(flushCtx)
+	closeErr := d.writer.Close()
+
+	if flushErr != nil {
+		return errors.Wrap(flushErr, "dispatcher: flushing on close")
 	}
 
-	return errors.Wrap(err, wrapMessage)
+	if closeErr != nil {
+		return errors.Wrap(closeErr, "dispatcher: closing writer")
+	}
+
+	return nil
 }

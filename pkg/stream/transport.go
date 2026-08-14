@@ -24,7 +24,8 @@ type Reader interface {
 // Writer publishes records to a topic.
 //
 // Produce is synchronous: it returns once the broker has acknowledged the
-// record or reported a failure, and honours cancellation of ctx.
+// record or reported a failure. Cancelling ctx is best-effort once a record is
+// in flight - an implementation may let it finish rather than abort it.
 //
 // Flush waits for anything still buffered. Close releases the connection; call
 // Flush first unless losing buffered records is acceptable.
