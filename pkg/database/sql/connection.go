@@ -80,7 +80,7 @@ func (c *dbConn) txFromContext(ctx context.Context) (Transaction, bool) {
 	return tx, ok
 }
 
-func (c *dbConn) Get(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
+func (c *dbConn) Get(ctx context.Context, dest any, query string, args ...any) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "database.get", tracer.SpanType("db"))
 	defer span.Finish()
 
@@ -93,7 +93,7 @@ func (c *dbConn) Get(ctx context.Context, dest interface{}, query string, args .
 	return pgErrWrapper(c.db.GetContext(ctx, dest, query, args...))
 }
 
-func (c *dbConn) Select(ctx context.Context, dest interface{}, query string, args ...interface{}) error {
+func (c *dbConn) Select(ctx context.Context, dest any, query string, args ...any) error {
 	span, ctx := tracer.StartSpanFromContext(ctx, "database.select", tracer.SpanType("db"))
 	defer span.Finish()
 
@@ -110,7 +110,7 @@ func (c *dbConn) Select(ctx context.Context, dest interface{}, query string, arg
 	return nil
 }
 
-func (c *dbConn) Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error) {
+func (c *dbConn) Exec(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	span, ctx := tracer.StartSpanFromContext(ctx, "database.exec", tracer.SpanType("db"))
 	defer span.Finish()
 

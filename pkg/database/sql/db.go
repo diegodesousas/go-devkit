@@ -24,10 +24,10 @@ type Transaction interface {
 }
 
 type Queryer interface {
-	Get(ctx context.Context, dest interface{}, query string, args ...interface{}) error
-	Select(ctx context.Context, dest interface{}, query string, args ...interface{}) error
+	Get(ctx context.Context, dest any, query string, args ...any) error
+	Select(ctx context.Context, dest any, query string, args ...any) error
 }
 
 type Execer interface {
-	Exec(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+	Exec(ctx context.Context, query string, args ...any) (sql.Result, error)
 }

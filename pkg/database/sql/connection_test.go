@@ -56,56 +56,56 @@ func TestDbConn_Exec(t *testing.T) {
         {
             name:  "Create affiliates table",
             query: `CREATE TABLE affiliates ( id SERIAL PRIMARY KEY, name VARCHAR );`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.NoError(t, err)
             },
         },
         {
             name:  "Create deals table",
             query: `CREATE TABLE deals (id SERIAL PRIMARY KEY NOT NULL, value int, affiliate_id INT UNIQUE NOT NULL REFERENCES affiliates (id) ON DELETE CASCADE)`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.NoError(t, err)
             },
         },
         {
             name:  "Insert into table",
             query: `INSERT INTO affiliates (name) VALUES ('Jon Doe')`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.NoError(t, err)
             },
         },
         {
             name:  "Insert into deal",
             query: `INSERT INTO deals (affiliate_id, value) VALUES (1, 100)`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.NoError(t, err)
             },
         },
         {
             name:  "Err while inserting duplicate value",
             query: `INSERT INTO deals (affiliate_id, value) VALUES (1, 100)`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.ErrorIs(t, err, sql.ErrUniqueViolation)
             },
         },
         {
             name:  "Err while inserting value with invalid FK",
             query: `INSERT INTO deals (affiliate_id, value) VALUES (2, 100)`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.ErrorIs(t, err, sql.ErrForeignKeyViolation)
             },
         },
         {
             name:  "Missing parameter Err",
             query: `INSERT INTO deals (affiliate_id, value) VALUES ($1, $2)`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.ErrorIs(t, err, sql.ErrNoParameter)
             },
         },
         {
             name:  "Unmapped Err",
             query: `INSERT INTO deals (affiliate_id, value) VALUES (1, 'abd')`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.Error(t, err)
             },
         },
@@ -113,14 +113,14 @@ func TestDbConn_Exec(t *testing.T) {
             name:  "Insert multiple values with args",
             args:  []any{"Connor McGregor", "John Jones"},
             query: `INSERT INTO affiliates (name) VALUES ($1), ($2)`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.NoError(t, err)
             },
         },
         {
             name:  "Syntax Err on insert",
             query: `INSERT INTO affiliates (name) VALUES (Jon Doe)`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.ErrorIs(t, err, sql.ErrSyntax)
             },
         },
@@ -153,7 +153,7 @@ func TestDbConn_Get(t *testing.T) {
             name:  "Get affiliate",
             dest:  &mockAffiliate{},
             query: `SELECT id, name FROM affiliates`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.NoError(t, err)
             },
             expect: &mockAffiliate{Id: 1, Name: "Jon Doe"},
@@ -162,7 +162,7 @@ func TestDbConn_Get(t *testing.T) {
             name:  "Not found",
             dest:  &mockAffiliate{},
             query: `SELECT id, name FROM affiliates WHERE name='John Rambo'`,
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.ErrorIs(t, err, stdSql.ErrNoRows)
             },
             expect: &mockAffiliate{},
@@ -171,7 +171,7 @@ func TestDbConn_Get(t *testing.T) {
             name:  "Unable to Scan the results from query, when a pointer is not passed",
             query: `SELECT id, Name FROM affiliates`,
             dest:  mockAffiliate{},
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.ErrorContains(t, err, "must pass a pointer, not a value, to StructScan destination")
             },
             expect: mockAffiliate{},
@@ -214,7 +214,7 @@ func TestDbConn_Select(t *testing.T) {
                 {2, "Connor McGregor"},
                 {3, "John Jones"},
             },
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.NoError(t, err)
             },
         },
@@ -226,7 +226,7 @@ func TestDbConn_Select(t *testing.T) {
             expect: &[]mockAffiliate{
                 {1, "Jon Doe"},
             },
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.NoError(t, err)
             },
         },
@@ -236,7 +236,7 @@ func TestDbConn_Select(t *testing.T) {
             query:  "SELECT id name FROM affiliate WHERE name = $1",
             args:   []any{"John Doe"},
             expect: &[]mockAffiliate{},
-            wantErr: func(t assert.TestingT, err error, i ...interface{}) bool {
+            wantErr: func(t assert.TestingT, err error, i ...any) bool {
                 return assert.Error(t, err)
             },
         },
