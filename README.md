@@ -1,6 +1,7 @@
 # go-devkit
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/diegodesousas/go-devkit.svg)](https://pkg.go.dev/github.com/diegodesousas/go-devkit)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 Go developer kit for multipurpose applications.
 
@@ -54,3 +55,7 @@ Shorter, self-contained snippets are the `Example` functions in each package, re
 | `make lint` | `gofmt -l`, `go vet` and `golangci-lint` |
 | `make fmt` | `gofmt -w` over `./pkg` and `./examples` |
 | `make release [BUMP=patch\|minor\|major]` | Cuts a version: validates, tests, tags, pushes and opens the GitHub release |
+
+## License
+
+[MIT](./LICENSE)
