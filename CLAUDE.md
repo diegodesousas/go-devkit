@@ -6,7 +6,9 @@ Não há binário — só `pkg/` (a lib) e `examples/` (um `package main` por re
 
 ## Comandos
 
-**Go, gofmt e golangci-lint rodam só dentro do container `dev`** ([compose.yaml](compose.yaml) + [Dockerfile](Dockerfile)), nunca no host. Git e gh continuam no host. O único pré-requisito local é Docker rodando.
+**Go, gofmt e golangci-lint rodam só dentro do container `dev`** ([compose.yaml](compose.yaml) + [Dockerfile](Dockerfile)), nunca no host. Git e gh continuam no host, assim como `make` e os utilitários POSIX do `next-version`, porque orquestram o container e leem `git tag`. Os pré-requisitos locais são Docker, git e gh.
+
+O `.claude/settings.json` reforça a regra: `deny` para `go`, `gofmt` e `golangci-lint` no host. O hook de `PostToolUse` roda [.claude/hooks/gofmt.sh](.claude/hooks/gofmt.sh) dentro do container, com o `jq` da imagem. O host só executa `docker compose`.
 
 | Comando | O que faz |
 |---|---|

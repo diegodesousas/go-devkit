@@ -9,8 +9,9 @@ ARG GOLANGCI_LINT_VERSION=v2.14.0
 # confluent-kafka-go v1.9.2 bundles an x86-64 librdkafka only, which does not
 # link on arm64. Linking the system library (build tag `dynamic`, set through
 # GOFLAGS below) keeps the image native on both architectures.
+# jq parses the Claude Code hook payload in .claude/hooks/gofmt.sh.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends librdkafka-dev \
+    && apt-get install -y --no-install-recommends librdkafka-dev jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Built from source so golangci-lint is always compiled with the image's Go,
