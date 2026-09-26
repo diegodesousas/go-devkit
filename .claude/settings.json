@@ -2,19 +2,15 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(go build *)",
-      "Bash(go test *)",
-      "Bash(go vet *)",
-      "Bash(go list *)",
-      "Bash(go doc *)",
-      "Bash(go env *)",
-      "Bash(gofmt *)",
-      "Bash(golangci-lint *)",
       "Bash(make test)",
       "Bash(make test-integration)",
       "Bash(make test-all)",
       "Bash(make lint)",
       "Bash(make fmt)",
+      "Bash(make shell)",
+      "Bash(docker compose run --rm dev *)",
+      "Bash(docker compose --progress quiet run --rm dev *)",
+      "Bash(docker compose build dev)",
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
@@ -28,6 +24,11 @@
       "Bash(gh pr view *)",
       "Bash(gh pr list *)",
       "Bash(docker info *)"
+    ],
+    "deny": [
+      "Bash(go *)",
+      "Bash(gofmt *)",
+      "Bash(golangci-lint *)"
     ]
   },
   "hooks": {
@@ -37,8 +38,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_response.filePath // .tool_input.file_path' | { read -r f; case \"$f\" in *.go) gofmt -w \"$f\";; esac; } 2>/dev/null || true",
-            "statusMessage": "gofmt",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && docker compose --progress quiet run --rm -T -e CLAUDE_PROJECT_DIR dev sh .claude/hooks/gofmt.sh 2>/dev/null || true",
+            "statusMessage": "gofmt (dev container)",
             "timeout": 15
           }
         ]

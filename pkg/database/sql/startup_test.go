@@ -3,16 +3,16 @@
 package sql_test
 
 import (
-    "context"
-    "fmt"
-    "log"
-    "os"
-    "testing"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"testing"
 
-    "github.com/diegodesousas/go-devkit/pkg/database/sql"
-    "github.com/jmoiron/sqlx"
-    "github.com/ory/dockertest/v3"
-    "github.com/ory/dockertest/v3/docker"
+	"github.com/diegodesousas/go-devkit/pkg/database/sql"
+	"github.com/jmoiron/sqlx"
+	"github.com/ory/dockertest/v3"
+	"github.com/ory/dockertest/v3/docker"
 )
 
 // pool represents an instance of a connection to a Docker API
@@ -20,94 +20,104 @@ var pool *dockertest.Pool
 var pgsql *dockertest.Resource
 
 func TestMain(m *testing.M) {
-    var err error
-    pool, err = dockertest.NewPool("")
-    if err != nil {
-        log.Fatalf("Could not build pool: %s", err)
-    }
+	var err error
+	pool, err = dockertest.NewPool("")
+	if err != nil {
+		log.Fatalf("Could not build pool: %s", err)
+	}
 
-    err = pool.Client.Ping()
-    if err != nil {
-        log.Fatalf("Could not ping docker: %s", err)
-    }
+	err = pool.Client.Ping()
+	if err != nil {
+		log.Fatalf("Could not ping docker: %s", err)
+	}
 
-    postgresInit()
+	postgresInit()
 
-    code := m.Run()
+	code := m.Run()
 
-    err = pool.Purge(pgsql)
-    if err != nil {
-        fmt.Printf("Could not purge resource: %s", err)
-    }
+	err = pool.Purge(pgsql)
+	if err != nil {
+		fmt.Printf("Could not purge resource: %s", err)
+	}
 
-    os.Exit(code)
+	os.Exit(code)
 }
 
 // postgresInit just initializes a postgres Image
 func postgresInit() {
-    resource, err := pool.RunWithOptions(&dockertest.RunOptions{
-        Repository: "postgres",
-        Tag:        "15.3",
-        Env:        []string{"POSTGRES_PASSWORD=test", "POSTGRES_DB=test"},
-    }, func(config *docker.HostConfig) {
-        config.AutoRemove = true
-        config.RestartPolicy = docker.RestartPolicy{
-            Name: "no",
-        }
-    })
-    if err != nil {
-        log.Fatalf("unable to connect to docker %s", err)
-    }
+	resource, err := pool.RunWithOptions(&dockertest.RunOptions{
+		Repository: "postgres",
+		Tag:        "15.3",
+		Env:        []string{"POSTGRES_PASSWORD=test", "POSTGRES_DB=test"},
+	}, func(config *docker.HostConfig) {
+		config.AutoRemove = true
+		config.RestartPolicy = docker.RestartPolicy{
+			Name: "no",
+		}
+	})
+	if err != nil {
+		log.Fatalf("unable to connect to docker %s", err)
+	}
 
-    err = resource.Expire(120)
-    if err != nil {
-        log.Fatalf("unable not expire resource: %s", err)
-    }
+	err = resource.Expire(120)
+	if err != nil {
+		log.Fatalf("unable not expire resource: %s", err)
+	}
 
-    var db *sqlx.DB
-    if err := pool.Retry(func() error {
-        dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
-            "localhost", resource.GetPort("5432/tcp"), "postgres", "test", "test", "disable")
-        db, err = sqlx.Connect("pgx", dsn)
-        if err != nil {
-            return err
-        }
-        return db.Ping()
-    }); err != nil {
-        log.Fatalf("Could not connect to database: %s", err)
-    }
+	var db *sqlx.DB
+	if err := pool.Retry(func() error {
+		dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=%s",
+			dockerHost(), resource.GetPort("5432/tcp"), "postgres", "test", "test", "disable")
+		db, err = sqlx.Connect("pgx", dsn)
+		if err != nil {
+			return err
+		}
+		return db.Ping()
+	}); err != nil {
+		log.Fatalf("Could not connect to database: %s", err)
+	}
 
-    pgsql = resource
+	pgsql = resource
 }
 
 func db() sql.Connection {
-    if !isContainerRunning() {
-        postgresInit()
-    }
+	if !isContainerRunning() {
+		postgresInit()
+	}
 
-    cfg := sql.Config{
-        Host:     "localhost",
-        Port:     pgsql.GetPort("5432/tcp"),
-        User:     "postgres",
-        Password: "test",
-        Database: "test",
-        SSLMode:  "disable",
-    }
-    db, err := sql.New(cfg)
-    if err != nil {
-        log.Fatalf("Could not connect to database: %s", err)
-    }
-    resetDatabase(db)
-    return db
+	cfg := sql.Config{
+		Host:     dockerHost(),
+		Port:     pgsql.GetPort("5432/tcp"),
+		User:     "postgres",
+		Password: "test",
+		Database: "test",
+		SSLMode:  "disable",
+	}
+	db, err := sql.New(cfg)
+	if err != nil {
+		log.Fatalf("Could not connect to database: %s", err)
+	}
+	resetDatabase(db)
+	return db
+}
+
+// dockerHost is where dockertest containers publish their ports. From inside
+// the dev container (compose.yaml) that is the Docker host, not localhost.
+func dockerHost() string {
+	if host := os.Getenv("DOCKERTEST_HOST"); host != "" {
+		return host
+	}
+
+	return "localhost"
 }
 
 func isContainerRunning() bool {
-    exitCode, _ := pgsql.Exec([]string{"echo", "up"}, dockertest.ExecOptions{})
-    return exitCode == 0
+	exitCode, _ := pgsql.Exec([]string{"echo", "up"}, dockertest.ExecOptions{})
+	return exitCode == 0
 }
 
 func resetDatabase(db sql.Connection) {
-    query := `
+	query := `
 	DO $$ DECLARE
     r RECORD;
 	BEGIN
@@ -117,29 +127,29 @@ func resetDatabase(db sql.Connection) {
 	END $$;
 	`
 
-    _, err := db.Exec(context.Background(), query)
-    if err != nil {
-        panic(err)
-    }
+	_, err := db.Exec(context.Background(), query)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func mockMigration(db sql.Connection) {
-    _, err := db.Exec(context.TODO(), `CREATE TABLE affiliates ( id SERIAL PRIMARY KEY, name VARCHAR );`)
-    if err != nil {
-        panic(err)
-    }
-    _, err = db.Exec(context.TODO(), `CREATE TABLE deals (id SERIAL PRIMARY KEY NOT NULL, value int, affiliate_id INT UNIQUE NOT NULL REFERENCES affiliates (id) ON DELETE CASCADE)`)
-    if err != nil {
-        panic(err)
-    }
-    affiliates := []any{"Jon Doe", "Connor McGregor", "John Jones"}
-    _, err = db.Exec(context.TODO(), `INSERT INTO affiliates (name) VALUES ($1), ($2), ($3)`, affiliates...)
-    if err != nil {
-        panic(err)
-    }
-    deals := []any{1, 100}
-    _, err = db.Exec(context.TODO(), `INSERT INTO deals (affiliate_id, value) VALUES ($1, $2)`, deals...)
-    if err != nil {
-        panic(err)
-    }
+	_, err := db.Exec(context.TODO(), `CREATE TABLE affiliates ( id SERIAL PRIMARY KEY, name VARCHAR );`)
+	if err != nil {
+		panic(err)
+	}
+	_, err = db.Exec(context.TODO(), `CREATE TABLE deals (id SERIAL PRIMARY KEY NOT NULL, value int, affiliate_id INT UNIQUE NOT NULL REFERENCES affiliates (id) ON DELETE CASCADE)`)
+	if err != nil {
+		panic(err)
+	}
+	affiliates := []any{"Jon Doe", "Connor McGregor", "John Jones"}
+	_, err = db.Exec(context.TODO(), `INSERT INTO affiliates (name) VALUES ($1), ($2), ($3)`, affiliates...)
+	if err != nil {
+		panic(err)
+	}
+	deals := []any{1, 100}
+	_, err = db.Exec(context.TODO(), `INSERT INTO deals (affiliate_id, value) VALUES ($1, $2)`, deals...)
+	if err != nil {
+		panic(err)
+	}
 }
