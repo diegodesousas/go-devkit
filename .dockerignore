@@ -1,0 +1,2 @@
+# The Dockerfile copies nothing: the repo is bind-mounted by compose.yaml.
+*

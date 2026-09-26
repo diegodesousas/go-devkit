@@ -1,7 +1,7 @@
 ---
 description: Cria um pacote novo em pkg/ seguindo as convenções do repo
 argument-hint: <nome-do-pacote> [descrição curta do que ele faz]
-allowed-tools: Read, Write, Edit, Grep, Glob, Bash(go build:*), Bash(go test:*), Bash(gofmt:*)
+allowed-tools: Read, Write, Edit, Grep, Glob, Bash(docker compose run --rm dev go build:*), Bash(docker compose run --rm dev go test:*), Bash(docker compose run --rm dev gofmt:*)
 ---
 
 Crie o pacote `pkg/$1` seguindo o padrão estabelecido do repo. Contexto adicional: $2
@@ -77,4 +77,4 @@ var ErrSomethingFailed = errors.New("$1: something failed")
 
 ## Ao final
 
-Rode `go build ./...` e `go test ./pkg/$1/...`, e mostre o resultado. Se o pacote merecer entrar no [README.md](README.md), pergunte antes de editá-lo — o README lista só os recursos de destaque.
+Rode `docker compose run --rm dev go build ./...` e `docker compose run --rm dev go test ./pkg/$1/... -race`, e mostre o resultado. Nada de `go` direto no host. Se o pacote merecer entrar no [README.md](README.md), pergunte antes de editá-lo — o README lista só os recursos de destaque.

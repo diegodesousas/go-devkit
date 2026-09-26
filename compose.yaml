@@ -1,0 +1,25 @@
+# Fixed project name so every worktree shares the same image and caches.
+name: go-devkit
+
+services:
+  dev:
+    build: .
+    image: go-devkit-dev
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+      - gomod:/go/pkg/mod
+      - gocache:/root/.cache
+      # pkg/database/sql integration tests start Postgres through dockertest,
+      # as a sibling container on the host daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      # Sibling containers publish their ports on the host, not on this
+      # container's localhost.
+      DOCKERTEST_HOST: host.docker.internal
+    extra_hosts:
+      - host.docker.internal:host-gateway
+
+volumes:
+  gomod:
+  gocache:

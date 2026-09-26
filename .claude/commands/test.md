@@ -1,9 +1,9 @@
 ---
-description: Roda os testes unitários (rápido, sem Docker)
-allowed-tools: Bash(make test), Bash(go test:*), Read, Grep, Glob
+description: Roda os testes unitários (rápido, sem Postgres)
+allowed-tools: Bash(make test), Bash(docker compose run --rm dev go test:*), Read, Grep, Glob
 ---
 
-Rode `make test` (testes unitários com `-race`, sem Docker).
+Rode `make test` (testes unitários com `-race`, no container `dev`). Para um pacote ou teste isolado: `docker compose run --rm dev go test ./pkg/<pkg>/... -race -run <Teste>`. Nunca `go test` direto no host.
 
 Se tudo passar, reporte em uma linha e pare.
 

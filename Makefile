@@ -1,23 +1,33 @@
-.PHONY: test test-integration test-all fmt lint next-version release
+.PHONY: test test-integration test-all fmt lint shell next-version release
 
 BUMP ?= patch
 VERSION ?=
 
-test:
-	go test ./pkg/... -race
+# Go, gofmt and golangci-lint run in the `dev` service of compose.yaml, never
+# on the host. --build is a no-op on a warm cache and rebuilds the image when
+# the Dockerfile changed.
+DEV = docker compose --progress quiet run --rm --build dev
 
+test:
+	$(DEV) go test ./pkg/... -race
+
+# -tags on the command line replaces the image's GOFLAGS, so `dynamic` has to
+# be repeated.
 test-integration:
-	go test ./pkg/database/sql/... -race -tags=integration -count=1
+	$(DEV) go test ./pkg/database/sql/... -race -tags=integration,dynamic -count=1
 
 test-all: test test-integration
 
 fmt:
-	gofmt -w ./pkg ./examples
+	$(DEV) gofmt -w ./pkg ./examples
 
 lint:
-	gofmt -l ./pkg ./examples
-	go vet ./...
-	golangci-lint run --timeout=5m
+	$(DEV) gofmt -l ./pkg ./examples
+	$(DEV) go vet ./...
+	$(DEV) golangci-lint run --timeout=5m
+
+shell:
+	$(DEV) bash
 
 next-version:
 	@version="$(VERSION)"; \

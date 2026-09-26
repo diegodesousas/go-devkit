@@ -6,17 +6,22 @@ Não há binário — só `pkg/` (a lib) e `examples/` (um `package main` por re
 
 ## Comandos
 
+**Go, gofmt e golangci-lint rodam só dentro do container `dev`** ([compose.yaml](compose.yaml) + [Dockerfile](Dockerfile)), nunca no host. Git e gh continuam no host. O único pré-requisito local é Docker rodando.
+
 | Comando | O que faz |
 |---|---|
-| `make test` | Testes unitários, `-race`. **Não precisa de Docker.** ~5s |
-| `make test-integration` | Só `pkg/database/sql`, com `-tags=integration`. **Exige Docker rodando** |
+| `make test` | Testes unitários, `-race`. ~5s com cache quente |
+| `make test-integration` | Só `pkg/database/sql`, com `-tags=integration,dynamic`. Sobe Postgres como container irmão |
 | `make test-all` | Os dois |
 | `make lint` | `gofmt -l` + `go vet ./...` + `golangci-lint run` |
 | `make fmt` | `gofmt -w` em `./pkg` e `./examples` |
-| `make next-version [BUMP=…]` | Só imprime a próxima versão. Não escreve nada — serve para conferir o cálculo |
-| `make release [BUMP=…]` | Corta a versão: valida, testa, cria a tag anotada, dá push e abre o GitHub Release |
+| `make shell` | Bash interativo no container |
+| `make next-version [BUMP=…]` | Só imprime a próxima versão. Não escreve nada — serve para conferir o cálculo. Roda no host (só git) |
+| `make release [BUMP=…]` | Corta a versão: valida, testa, cria a tag anotada, dá push e abre o GitHub Release. Git e gh no host, `test`/`lint` no container |
 
-`CGO_ENABLED=1` é obrigatório: `confluent-kafka-go v1.9.2` embute librdkafka via cgo, e `-race` também depende disso.
+Comando avulso: `docker compose run --rm dev go test ./pkg/stream/... -run TestX`. Todo alvo do Makefile passa `--build`, que custa ~0,3s com cache quente e reconstrói a imagem quando o `Dockerfile` muda. Módulos e build cache ficam nos volumes nomeados `go-devkit_gomod` e `go-devkit_gocache`, compartilhados entre worktrees (`name: go-devkit` fixo no compose).
+
+`CGO_ENABLED=1` é obrigatório: `confluent-kafka-go v1.9.2` embute librdkafka via cgo, e `-race` também depende disso. A imagem já exporta.
 
 ## Release
 
@@ -24,7 +29,7 @@ Não há binário — só `pkg/` (a lib) e `examples/` (um `package main` por re
 
 O alvo aborta antes de criar qualquer coisa se: não estiver na `main`, a working tree estiver suja, `HEAD` divergir de `origin/main` (ele dá `git fetch` antes), ou a tag já existir — local ou remota. Passando por tudo, roda `make test`, `make lint`, cria a tag anotada, faz `git push` dela e chama `gh release create --generate-notes`.
 
-**`test-integration` fica de fora de propósito**, para o release não exigir Docker. Se a versão mexe em `pkg/database/sql`, rode `make test-all` antes.
+**`test-integration` fica de fora de propósito.** O motivo original era o release não exigir Docker; com o toolchain em container esse motivo não vale mais, mas o comportamento foi mantido. Se a versão mexe em `pkg/database/sql`, rode `make test-all` antes.
 
 ## Fluxo de trabalho git
 
@@ -93,14 +98,22 @@ A suíte é **ordem-dependente por construção**: `TestTransactionContext_Commi
 
 **`pkg/cache` e `pkg/metrics` não têm nenhum teste.** `metrics.New()` tem `"localhost:8125"` hardcoded.
 
-**Subir o Go obriga a subir o golangci-lint junto.** O binário aborta antes de lintar quando foi buildado com um Go anterior ao alvo do `go.mod`:
+**Subir o Go mexe em quatro lugares:** a diretiva `go` do `go.mod`, o `FROM golang:` do [Dockerfile](Dockerfile), e o `go-version` de `ci.yml` e `lint.yml`. O golangci-lint é compilado na imagem com o Go dela (`go install`, versão no `ARG GOLANGCI_LINT_VERSION`), o que evita este erro, que ele dá quando foi buildado com um Go anterior ao alvo do `go.mod`:
 
 ```
 can't load config: the Go language version (go1.24) used to build
 golangci-lint is lower than the targeted Go version (1.26.0)
 ```
 
-Ao mexer na diretiva `go`, confira `golangci-lint --version` e atualize com `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@<versão>` — o `version:` do `lint.yml` tem que acompanhar.
+Ao subir o golangci-lint, o `ARG` do Dockerfile e o `version:` do `lint.yml` andam juntos.
+
+**No container, o Kafka linka contra o librdkafka do sistema, não o embutido.** O `confluent-kafka-go v1.9.2` só embute `.a` x86-64 para Linux, que não linka em arm64 (`file in wrong format`). A imagem instala `librdkafka-dev` (2.8.0 no Debian) e exporta `GOFLAGS=-tags=dynamic`. Duas consequências:
+- **Passar `-tags` na linha de comando substitui o `GOFLAGS`.** Repita o `dynamic`: `-tags=integration,dynamic`. Sem ele, `pkg/stream` quebra no link.
+- **Local e CI usam librdkafka diferentes.** O CI roda nativo em amd64, com o 1.9.2 estático. Um bug que só aparece num dos dois pode vir daí.
+
+**Integração com o container irmão:** o dockertest sobe o Postgres pelo socket do host, montado no compose, e a porta é publicada no host, não no `localhost` do container `dev`. O helper `dockerHost()` em [startup_test.go](pkg/database/sql/startup_test.go) lê `DOCKERTEST_HOST` (`host.docker.internal` no compose) e cai para `localhost`, que é o que o CI usa.
+
+**O editor ainda usa Go do host.** O gopls da extensão Go do VS Code não passa pelo container. Remover o Go do host desliga o LSP, não o build.
 
 ## Dívida conhecida (não mexer sem pedir)
 

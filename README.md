@@ -45,15 +45,16 @@ Shorter, self-contained snippets are the `Example` functions in each package, re
 
 ## Development
 
-`CGO_ENABLED=1` is required: `confluent-kafka-go` embeds librdkafka through cgo, and `-race` depends on it too.
+The toolchain runs in a container: the only local requirement is Docker. Every `make` target below builds the `dev` image from the [Dockerfile](./Dockerfile) (Go, golangci-lint and librdkafka) and runs inside it through [compose.yaml](./compose.yaml). For one-off commands, use `docker compose run --rm dev go ...`.
 
 | Command | What it does |
 |---|---|
-| `make test` | Unit tests with `-race`. No Docker needed |
-| `make test-integration` | `pkg/database/sql` only, with `-tags=integration`. Needs Docker |
+| `make test` | Unit tests with `-race` |
+| `make test-integration` | `pkg/database/sql` only, with `-tags=integration`. Starts Postgres as a sibling container |
 | `make test-all` | Both |
 | `make lint` | `gofmt -l`, `go vet` and `golangci-lint` |
 | `make fmt` | `gofmt -w` over `./pkg` and `./examples` |
+| `make shell` | Interactive shell in the `dev` container |
 | `make release [BUMP=patch\|minor\|major]` | Cuts a version: validates, tests, tags, pushes and opens the GitHub release |
 
 ## License
