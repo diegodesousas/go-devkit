@@ -90,7 +90,7 @@ Sentinelas exportadas ficam em `errors.go`, com prefixo `Err`. Referência: [pkg
 
 A suíte é **ordem-dependente por construção**: `TestTransactionContext_Commit_Error` mata o container de propósito (`pgsql.Close()`) para forçar erro de commit, e o helper `db()` recria o Postgres via `isContainerRunning()`. Por isso `-count=1`.
 
-**Efeito colateral do build tag:** o gopls/LSP não indexa esses três arquivos sem `buildFlags: ["-tags=integration"]` na config do editor. Erros do tipo "No packages found for open file" ali são esperados, não são bug.
+**Efeito colateral do build tag:** o gopls/LSP não indexa esses três arquivos sem `-tags=integration` nos `buildFlags`. O [.vscode/settings.json](.vscode/settings.json) já configura isso para o VS Code. Em outros editores, ou sem essa config, erros do tipo "No packages found for open file" ali são esperados, não são bug.
 
 **dd-trace-go está sempre ligado**, não é opcional: spans em `dispatcher.Dispatch`, em todos os métodos de `sql.dbConn` e no router chi. A option `WithAPM` do httpserver controla apenas `tracer.Start()`, não a instrumentação.
 

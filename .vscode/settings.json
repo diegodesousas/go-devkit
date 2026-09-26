@@ -1,0 +1,7 @@
+{
+  "gopls": {
+    // Indexes the //go:build integration tests in pkg/database/sql, which
+    // gopls otherwise reports as "No packages found for open file".
+    "build.buildFlags": ["-tags=integration"]
+  }
+}
