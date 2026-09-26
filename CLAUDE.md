@@ -104,7 +104,7 @@ Ao mexer na diretiva `go`, confira `golangci-lint --version` e atualize com `go 
 
 ## Dívida conhecida (não mexer sem pedir)
 
-- **Não existe `.golangci.yml`** — valem os linters default do golangci-lint v2, em que o `gosimple` foi absorvido pelo `staticcheck`. CI e local rodam a mesma versão, **v2.12.2** (no CI via `golangci-lint-action@v8`, com `only-new-issues: true`).
+- **Não existe `.golangci.yml`** — valem os linters default do golangci-lint v2, em que o `gosimple` foi absorvido pelo `staticcheck`. CI e local rodam a mesma versão, **v2.14.0** (no CI via `golangci-lint-action@v8`, com `only-new-issues: true`).
 - **Os workflows usam `cache: false`**, então cada job baixa as dependências do zero.
 - **28 dos 64 arquivos `.go` falham no `gofmt -l`** (indentados com espaços, herança do `.editorconfig` antigo). Não reformate em massa: o hook de `PostToolUse` normaliza cada arquivo conforme for editado.
 - O coverprofile do CI é gerado e descartado — sem upload, sem threshold.
