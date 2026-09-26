@@ -27,6 +27,7 @@ The reference documentation lives on [pkg.go.dev](https://pkg.go.dev/github.com/
 | [`metrics`](https://pkg.go.dev/github.com/diegodesousas/go-devkit/pkg/metrics) | StatsD metrics emitted through a client carried in the context |
 | [`validator`](https://pkg.go.dev/github.com/diegodesousas/go-devkit/pkg/validator) | Composable validation rules with machine-readable error codes |
 | [`gen`](https://pkg.go.dev/github.com/diegodesousas/go-devkit/pkg/gen) | String generators: UUID, ULID and sequence |
+| [`shutdown`](https://pkg.go.dev/github.com/diegodesousas/go-devkit/pkg/shutdown) | Ordered, deadline-bound release of resources (HTTP server, database, ...) on shutdown |
 | [`mapper`](https://pkg.go.dev/github.com/diegodesousas/go-devkit/pkg/mapper) | Generic registry keyed by a string-like type |
 | [`encoding`](https://pkg.go.dev/github.com/diegodesousas/go-devkit/pkg/encoding) | JSON serializer behind an interface |
 | [`httpclient`](https://pkg.go.dev/github.com/diegodesousas/go-devkit/pkg/httpclient) | `*http.Client` behind a one-method interface, with a mock |

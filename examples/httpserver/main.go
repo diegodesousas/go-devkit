@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/diegodesousas/go-devkit/pkg/gen"
 	"github.com/diegodesousas/go-devkit/pkg/httpserver"
 	pkgLog "github.com/diegodesousas/go-devkit/pkg/log"
+	"github.com/diegodesousas/go-devkit/pkg/shutdown"
 	"github.com/pkg/errors"
 )
 
@@ -45,7 +47,7 @@ func main() {
 	)
 
 	log.Println("Server starting...")
-	shutdown := server.Run()
+	stopServer := server.Run()
 
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
@@ -59,7 +61,9 @@ func main() {
 	log.Println("Server running on port 8080")
 	<-interrupt
 
-	if err := shutdown(context.Background()); err != nil {
+	// Bound the shutdown so a connection that never finishes cannot hang the
+	// process. Further steps (e.g. closing a database) go after the server.
+	if err := shutdown.Graceful(context.Background(), 15*time.Second, shutdown.Step(stopServer)); err != nil {
 		log.Fatal(err)
 	}
 
